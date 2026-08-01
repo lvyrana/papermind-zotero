@@ -1,0 +1,5 @@
+.DS_Store
+*.log
+
+# XPI is produced by build.sh and distributed as a release artifact.
+*.xpi

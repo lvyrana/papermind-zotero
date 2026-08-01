@@ -2,6 +2,8 @@
 
 PaperMind Connector 把 Zotero 中的论文元数据和本地 PDF 一键送入 PaperMind，继续完成结构化精读、证据卡片、苏格拉底自测与汇报整理。
 
+> 当前为公开测试源码，尚未提交 Zotero 社区插件市场。正式 Release、许可证和长期身份方案仍在准备中。
+
 ## 当前能力
 
 - 在 Zotero 文献右键菜单中提供「用 PaperMind 精读」
@@ -12,7 +14,7 @@ PaperMind Connector 把 Zotero 中的论文元数据和本地 PDF 一键送入 P
 
 ## 安装与连接
 
-1. 下载 `papermind-connector.xpi`。
+1. 下载[当前测试版 XPI](https://papermindapp.com/api/zotero-plugin/papermind-connector.xpi)。
 2. Zotero →「工具」→「插件」→ 齿轮按钮 →「从文件安装插件」。
 3. 打开 PaperMind 设置页，复制「我的专属链接」。
 4. Zotero →「工具」→「PaperMind 连接设置…」，粘贴该链接。
@@ -29,9 +31,18 @@ PaperMind 当前小范围试用不需要共享访问密码。`0.2.x` 升级到 `
 ## 开发
 
 ```bash
-node --test zotero-plugin/test-bootstrap.mjs
-bash zotero-plugin/build.sh
-unzip -l zotero-plugin/papermind-connector.xpi
+node --test test-bootstrap.mjs
+bash build.sh
+unzip -t papermind-connector.xpi
 ```
 
-当前版本以 Zotero 9 为实际验证上限。公开插件市场发布前，仍需完成正式身份、隐私政策、许可证、双语界面和独立 GitHub Release。
+每次 push 和 pull request 都会在 GitHub Actions 中重新运行测试、构建并检查 XPI。当前版本以 Zotero 9 为实际验证上限。
+
+## 发布边界
+
+- 当前 XPI 仍通过 PaperMind 主站下载与更新接口分发，源码仓库不提交构建产物；正式版将改用独立 GitHub Release。
+- 当前匿名设备 ID 适合小范围试用，但不是面向公开市场的正式账号或可撤销令牌。
+- 仓库暂未选择开源许可证；在明确添加 `LICENSE` 前，不视为授权第三方复制、修改或再分发。
+- 公开插件市场发布前，仍需完成隐私政策、许可证、正式身份、双语界面和版本兼容测试。
+
+问题反馈可通过本仓库的 GitHub Issues 提交。请勿在 Issue 中粘贴专属链接、设备 ID、论文全文或患者信息。

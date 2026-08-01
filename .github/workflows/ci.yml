@@ -1,0 +1,36 @@
+name: Connector CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run connector tests
+        run: node --test test-bootstrap.mjs
+
+      - name: Build XPI
+        run: bash build.sh
+
+      - name: Verify XPI archive
+        run: unzip -t papermind-connector.xpi
+
+      - name: Upload test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: papermind-connector-test-build
+          path: papermind-connector.xpi
+          if-no-files-found: error
