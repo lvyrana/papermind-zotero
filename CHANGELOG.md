@@ -7,3 +7,4 @@
 - Add the connector icon, public repository documentation, privacy boundary, tests and reproducible XPI build.
 - Limit the declared compatibility range to the Zotero 7-9 bootstrap architecture; Zotero 9 is the current verified environment.
 - Add privacy, security and support policies plus tag-driven GitHub Release automation.
+- License the standalone Connector source under AGPL-3.0-only and include the license text in release XPIs.
