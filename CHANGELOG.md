@@ -6,3 +6,4 @@
 - Migrate existing `0.2.x` settings while preserving the PaperMind URL and anonymous device identity.
 - Add the connector icon, public repository documentation, privacy boundary, tests and reproducible XPI build.
 - Limit the declared compatibility range to the Zotero 7-9 bootstrap architecture; Zotero 9 is the current verified environment.
+- Add privacy, security and support policies plus tag-driven GitHub Release automation.

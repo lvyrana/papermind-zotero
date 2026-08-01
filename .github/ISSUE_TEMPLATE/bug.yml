@@ -1,0 +1,47 @@
+name: Bug report
+description: Report a reproducible PaperMind Connector problem
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Do not include personal links, device IDs, API keys, PDFs or patient information. Report security vulnerabilities privately instead.
+  - type: input
+    id: connector-version
+    attributes:
+      label: Connector version
+      placeholder: 0.3.0
+    validations:
+      required: true
+  - type: input
+    id: zotero-version
+    attributes:
+      label: Zotero version
+      placeholder: 9.0.6
+    validations:
+      required: true
+  - type: input
+    id: operating-system
+    attributes:
+      label: Operating system
+      placeholder: macOS 15 / Windows 11 / Linux
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      placeholder: Describe what you selected, clicked and observed without including paper content.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Non-sensitive error message

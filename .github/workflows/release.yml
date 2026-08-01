@@ -1,0 +1,47 @@
+name: Release XPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify tag matches manifest
+        shell: bash
+        run: |
+          manifest_version="$(node -p "JSON.parse(require('fs').readFileSync('manifest.json', 'utf8')).version")"
+          if [[ "v${manifest_version}" != "${GITHUB_REF_NAME}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match manifest version ${manifest_version}" >&2
+            exit 1
+          fi
+
+      - name: Run connector tests
+        run: node --test test-bootstrap.mjs
+
+      - name: Build and verify XPI
+        run: |
+          bash build.sh
+          unzip -t papermind-connector.xpi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" papermind-connector.xpi \
+            --title "PaperMind Connector ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --latest
