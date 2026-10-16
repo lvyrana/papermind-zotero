@@ -10,11 +10,16 @@ trap 'rm -f "$TMP_XPI"' EXIT
 rm -f "$TMP_XPI"
 
 node --check "$PLUGIN_DIR/bootstrap.js"
+node --check "$PLUGIN_DIR/sidebar.js"
+node --check "$PLUGIN_DIR/reader-context.js"
+node --check "$PLUGIN_DIR/workspace.js"
+node --check "$PLUGIN_DIR/account.js"
 python3 -m json.tool "$PLUGIN_DIR/manifest.json" >/dev/null
 
 (
     cd "$PLUGIN_DIR"
-    zip -X -q -j "$TMP_XPI" manifest.json bootstrap.js icon.svg LICENSE
+    zip -X -q "$TMP_XPI" manifest.json bootstrap.js sidebar.js reader-context.js workspace.js account.js icon.svg LICENSE
+    zip -X -q -r "$TMP_XPI" locale -i '*.ftl'
 )
 
 mv "$TMP_XPI" "$PLUGIN_DIR/papermind-connector.xpi"

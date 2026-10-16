@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
-  "name": "PaperMind Connector",
-  "version": "0.3.0",
-  "description": "把 Zotero 论文与 PDF 一键送入 PaperMind，继续结构化精读、卡片沉淀、自测与汇报",
+  "name": "研雀 · LitFinch",
+  "version": "0.7.0",
+  "description": "研雀论文阅读台：在 Zotero 中带读、翻译、追问、整理卡片与汇报；保留网页精读入口",
   "author": "雀雀",
   "homepage_url": "https://papermindapp.com",
   "icons": {

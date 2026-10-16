@@ -3,3 +3,6 @@
 
 # XPI is produced by build.sh and distributed as a release artifact.
 *.xpi
+
+# Trial archives are local distribution artifacts, not source.
+*.zip

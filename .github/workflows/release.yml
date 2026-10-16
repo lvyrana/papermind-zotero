@@ -18,7 +18,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Verify tag matches manifest
         shell: bash
@@ -30,7 +30,7 @@ jobs:
           fi
 
       - name: Run connector tests
-        run: node --test test-bootstrap.mjs
+        run: node --test test-*.mjs
 
       - name: Build and verify XPI
         run: |

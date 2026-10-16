@@ -1,18 +1,26 @@
-# PaperMind Connector 隐私政策
+# LitFinch for Zotero 隐私政策
 
-生效日期：2026-08-01
+更新日期：2026-10-08（原 PaperMind Connector 现更名为研雀 · LitFinch；0.7.0 本地候选版，身份登录尚未正式启用；旧公开 0.3.0 不含连接修补）
 
-本政策适用于 PaperMind Connector Zotero 插件。插件把用户主动选择的文献发送到用户配置的 PaperMind 服务；它不是 Zotero 官方组件，Zotero 的隐私政策与本政策分别适用。
+本政策适用于研雀 · LitFinch 的 Zotero 插件。插件把用户主动选择的文献发送到用户配置的研雀服务；它不是 Zotero 官方组件，Zotero 的隐私政策与本政策分别适用。
 
 ## 1. 插件在本地保存什么
 
-插件在 Zotero 首选项中保存：PaperMind 服务地址、匿名设备 ID 和配置版本。旧版曾保存共享预览凭据；`0.3.0` 会清除这些旧字段。
+插件在 Zotero 首选项中保存：研雀服务地址、匿名设备 ID 和配置版本。旧版曾保存共享预览凭据；`0.3.0` 会清除这些旧字段。
+
+0.7.0 登录后还会在 Zotero/Firefox Login Manager 保存研雀会话凭据和账号标识，不在首选项、浏览器跳转 URL 或阅读文件中保存会话秘密。该凭据不是 Zotero 密码或 Zotero 文库 API Key。退出时向服务撤销当前会话；撤销失败会提示并保留凭据供重试。
+
+0.6.0 阅读台在 Zotero 配置目录的 `papermind-reading/` 中保存本篇卡片、带读结果、对话、已提交自测、汇报与已保存草稿。文件名是服务地址、身份及论文标识的 SHA-256 摘要，不包含明文凭据；文件内容可能包含论文选段和个人笔记。本地文件未额外加密，受操作系统账户保护，不随 Zotero 文库自动同步。
 
 专属链接中的设备 ID 相当于当前测试阶段的身份凭据。任何得到该链接的人都可能访问同一身份下的数据，请勿公开转发或粘贴到 GitHub Issue。
 
+明确关联旧身份到账号后，旧链接不再单独授权访问服务器记录。账号会话最长有效 30 天，登录请求及一次性连接码有效 10 分钟。插件本地阅读文件仍由操作系统保护，不因网站登录而加密或云同步。
+
 ## 2. 什么时候会发送数据
 
-只有用户主动选择 Zotero 条目并点击「用 PaperMind 精读」时，插件才会发送当前条目的：
+点击账号登录会向研雀发送现有设备标识，领取一次性连接码。浏览器在 Zotero 官方页面完成 `identity=1` 身份确认；研雀获得 Zotero 用户数字 ID 和用户名，不请求云端文库读取/写入权限。插件通过短期轮询接收自己的研雀会话。服务端保存账号与数据归属、会话哈希及限流记录，备份包含账号归属；恢复备份会撤销旧会话。此流程不发送论文或卡片。
+
+用户主动选择 Zotero 条目并点击「用研雀精读」时，插件会发送当前条目的：
 
 - 题名、作者、期刊、日期、DOI、PMID、摘要等文献元数据；
 - 当前条目可访问的最佳 PDF 附件；
@@ -20,34 +28,44 @@
 
 插件不会自动上传整个 Zotero 文库，也不会在后台遍历其他条目。
 
-## 3. PaperMind 服务可能保存什么
+`0.4.0` 的原生精读侧栏在点击「读摘要」「精读这段」「翻译」或发送问题时，会发送相关题名、摘要、选段、页码、问题与最近的对话上下文，以及已配置的匿名设备 ID。该路径不上传整份 PDF，也不自动建立服务器收藏。服务仍可能按既有策略记录请求、用量与必要诊断信息。
 
-PaperMind 服务可能保存用户发送的文献元数据、PDF，以及后续在网页端产生的阅读记录、划词、卡片、笔记、对话、汇报板、自测记录和反馈。服务器基础设施还可能生成包含请求时间、接口路径、IP 地址和浏览器信息的标准访问日志。
+0.6.0 带读、追问和自测还会读取当前打开 PDF 的本地文字层，在点击 AI 操作时发送当前页及带页码的相关文字节选，自测可包含个人阅读卡片。仅处理当前论文，不扫描其他条目。长文节选有范围说明；此路径不上传 PDF 文件。0.4–0.5 的对话仅在内存中；0.6 的记录按第 1 节持久保存。
+
+点击「存为 Zotero 笔记」或「保存汇报到 Zotero 笔记」会创建当前文献的子笔记；笔记遵循用户的 Zotero 同步配置，可能同步至 Zotero 或所属群组，不限于本机。
+
+## 3. 研雀服务可能保存什么
+
+研雀服务可能保存用户发送的文献元数据、PDF，以及后续在网页端产生的阅读记录、划词、卡片、笔记、对话、汇报板、自测记录和反馈。服务器基础设施还可能生成包含请求时间、接口路径、IP 地址和浏览器信息的标准访问日志。
 
 这些数据用于提供精读、恢复阅读进度、生成内容、故障排查、限额控制和产品改进，不用于出售个人信息。
 
 ## 4. 第三方 AI 服务
 
-当用户在 PaperMind 中使用精读、问答、卡片起草或自测等 AI 功能时，相关论文内容、选中文本、问题和必要上下文可能发送给服务运营者配置的第三方模型提供商。具体提供商可能随部署配置和故障回退策略变化。
+当用户在研雀中使用精读、问答、卡片起草或自测等 AI 功能时，相关论文内容、选中文本、问题和必要上下文可能发送给服务运营者配置的第三方模型提供商。具体提供商可能随部署配置和故障回退策略变化。
 
-请勿使用 PaperMind 处理患者身份信息、未公开敏感研究数据、机构机密，或用户无权上传和处理的文献。
+请勿使用研雀处理患者身份信息、未公开敏感研究数据、机构机密，或用户无权上传和处理的文献。
 
 ## 5. 保存与删除
 
 当前公开测试阶段尚未承诺统一的自动删除期限。数据通常保留到用户主动删除对应条目，或提出完整删除请求为止；备份中的副本可能在备份轮换完成前继续存在。
 
-卸载插件或清除浏览器中的设备 ID 不会自动删除服务器数据。需要删除当前匿名身份下的全部数据时，请在 PaperMind「设置 → 用户反馈」中提交删除请求；反馈会自动关联当前设备身份，无需在正文中填写专属链接或设备 ID。
+卸载插件或清除浏览器中的设备 ID 不会自动删除服务器数据。需要删除当前匿名身份下的全部数据时，请在研雀「设置 → 用户反馈」中提交删除请求；反馈会自动关联当前设备身份，无需在正文中填写专属链接或设备 ID。
+
+卸载不会自动删除本地 `papermind-reading/`。需要清理本地记录时，退出 Zotero 后可先备份该目录，再移至废纸篓；这不会删除文库中的 PDF 或已另存的 Zotero 笔记。本地阅读记录尚无应用内回收站或跨设备同步。
 
 ## 6. 用户可以做什么
 
-- 不点击「用 PaperMind 精读」，插件就不会发送当前条目；
-- 在 PaperMind 中删除单篇论文、PDF、笔记、卡片和对话等内容；
+- 不点击网页精读或侧栏 AI 操作，插件就不会发送文献内容；
+- 在研雀中删除单篇论文、PDF、笔记、卡片和对话等内容；
 - 通过应用内反馈请求删除当前身份的全部服务器数据；
 - 通过 Zotero 插件管理器停用或卸载 Connector。
 
 ## 7. 安全与当前限制
 
-数据传输使用配置服务的 HTTP 或 HTTPS 地址；公开服务默认使用 HTTPS。匿名设备 ID 不是正式账号体系，当前也没有令牌撤销、密码恢复或多因素认证，因此本版本适合低敏感、小范围测试，不应被视为医疗数据系统。
+当前源码拒绝远程 HTTP 服务地址，仅允许 HTTPS 或明确的 localhost / 127.0.0.1 / [::1] 本机 HTTP 调试；携带凭据的请求拒绝自动重定向。导入期间更改服务地址、设备身份或账号会话会停止后续上传及浏览器跳转；已完成的请求不会自动撤回。0.7.0 提供当前研雀会话的退出撤销，Zotero 密码与认证由 Zotero 管理。未关联账号的旧专属链接仍属于匿名凭据；本次尚未提供全设备会话管理、自动跨设备同步或账号删除界面。身份登录尚需真实服务与原生 Zotero 验收。
+
+旧地址不安全导致退出无法联网时，可明确确认仅移除本机登录记录，以便修复连接；不会发送 token，也不会删除阅读文件。该操作不会撤销远端会话，须使用安全地址或服务管理端继续处理；取消确认则保留现有本机登录。
 
 安全漏洞请按照 [SECURITY.md](SECURITY.md) 私下报告，不要在公开 Issue 中披露可利用细节或身份信息。
 
@@ -59,4 +77,4 @@ PaperMind 服务可能保存用户发送的文献元数据、PDF，以及后续�
 
 ## English Summary
 
-PaperMind Connector uploads only the Zotero item explicitly selected by the user, including its metadata, best available PDF attachment and an anonymous device identifier. It does not scan or upload the full Zotero library. Paper content and prompts may be sent to third-party AI providers configured by the PaperMind service. Server data is retained until item deletion or a verified deletion request; no uniform automatic retention period is promised during the public beta. Do not use the service for patient-identifiable, confidential or unauthorized content.
+LitFinch for Zotero uploads only the Zotero item explicitly selected by the user, including its metadata, best available PDF attachment and an anonymous device identifier. It does not scan or upload the full Zotero library. Paper content and prompts may be sent to third-party AI providers configured by the LitFinch service. Server data is retained until item deletion or a verified deletion request; no uniform automatic retention period is promised during the public beta. Do not use the service for patient-identifiable, confidential or unauthorized content.
