@@ -18,9 +18,10 @@ python3 -m json.tool "$PLUGIN_DIR/manifest.json" >/dev/null
 
 (
     cd "$PLUGIN_DIR"
-    zip -X -q "$TMP_XPI" manifest.json bootstrap.js sidebar.js reader-context.js workspace.js account.js icon.svg LICENSE
+    zip -X -q "$TMP_XPI" manifest.json bootstrap.js sidebar.js reader-context.js workspace.js account.js icon.svg LICENSE THIRD_PARTY_NOTICES.md
     zip -X -q -r "$TMP_XPI" locale -i '*.ftl'
 )
 
+node "$PLUGIN_DIR/scripts/check-package.mjs" "$TMP_XPI" >/dev/null
 mv "$TMP_XPI" "$PLUGIN_DIR/papermind-connector.xpi"
 echo "Built $PLUGIN_DIR/papermind-connector.xpi"

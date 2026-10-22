@@ -145,6 +145,13 @@ try {
   assert.ok(layout.bottom < layout.height); assert.equal(layout.injected, 0); assert.equal(layout.scroll, true)
   await page.getByRole('button', { name: '← 返回阅读台', exact: true }).click()
   await page.screenshot({ path: join(artifacts, 'reading-with-card.png') })
+  // Capture the actual component with a readable synthetic title for the README.
+  // Keep the preceding long-title stress test and its evidence unchanged.
+  await page.evaluate(() => {
+    __paper.getField = __originalGetField
+    PaperMindSidebar.refresh(PaperMindSidebar.sessionFor(__paper))
+  })
+  await page.locator('.pmw').screenshot({ path: join(artifacts, 'readme-reading-card.png') })
   await page.evaluate(async () => {
     const old = PaperMindSidebar.sessionFor(__paper)
     await PaperMindWorkspace.persist(old)
