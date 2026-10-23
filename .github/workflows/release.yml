@@ -42,6 +42,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" papermind-connector.xpi \
-            --title "PaperMind Connector ${GITHUB_REF_NAME}" \
-            --generate-notes \
+            --title "研雀 · LitFinch ${GITHUB_REF_NAME}" \
+            --notes-file RELEASE_NOTES.md \
             --latest

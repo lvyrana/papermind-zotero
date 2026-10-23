@@ -19,6 +19,9 @@ package, PDF, user reading record or credential is bundled in this XPI.
   Playwright and its browser are used only for development tests.
 - The configured LitFinch server and model providers are remote services. Their
   dependencies and service terms are not included in, or licensed by, this XPI.
+- The unreleased migration implementation can upload PDFs directly to the
+  configured LitFinch deployment's private Vercel Blob store using a temporary
+  signed URL. No Vercel SDK is bundled in the Connector; it uses host fetch.
 
 ## Scope of this inventory
 

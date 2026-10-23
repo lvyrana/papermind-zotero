@@ -259,6 +259,58 @@ var PaperMind = {
     }
   },
 
+  async uploadPdf(win, paperId, bytes, connection) {
+    const file = new win.Blob([bytes], { type: 'application/pdf' })
+    if (file.size < 5 || file.size > 50 * 1024 * 1024) throw new Error('PDF 文件应为 5 字节至 50MB。')
+    const request = async (path, options = {}) => {
+      this.requireCurrentConnection(connection)
+      const response = await win.fetch(connection.base + path, {
+        ...options, headers: this.requestHeaders(options.headers || {}, connection),
+        credentials: 'omit', redirect: 'error',
+      })
+      this.requireCurrentConnection(connection)
+      return response
+    }
+    const config = await request('/api/file-storage')
+    let mode = 'server'
+    if (config.status !== 404) {
+      await this.requireOk(config, '查询文件上传方式')
+      mode = (await config.json()).mode
+    }
+    if (mode === 'server') {
+      const form = new win.FormData()
+      form.append('file', file, 'paper.pdf')
+      return this.requireOk(await request(`/api/library/${paperId}/pdf`, { method: 'POST', body: form }), '上传 PDF')
+    }
+    if (mode !== 'direct') throw new Error('文件上传服务尚未准备好。')
+    if (!connection.token) throw new Error('云端 PDF 上传需要在阅读台登录研雀账号。')
+    const response = await request('/api/file-grant', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paper_id: paperId, size: file.size }),
+    })
+    await this.requireOk(response, '获取 PDF 上传许可')
+    const grant = await response.json()
+    const url = new win.URL(grant.upload_url)
+    if (url.origin !== 'https://vercel.com' || url.pathname !== '/api/blob/' || url.username || url.password
+      || !/^[0-9a-f]{32}$/.test(grant.upload_id)) throw new Error('文件上传许可无效。')
+    this.requireCurrentConnection(connection)
+    // Signed URLs are short-lived capabilities. Do not send account headers,
+    // browser cookies or referrers to Blob, and never log a signed URL/error.
+    let uploaded
+    try {
+      uploaded = await win.fetch(url.href, { method: 'PUT', body: file,
+        headers: { 'Content-Type': 'application/pdf' }, credentials: 'omit',
+        redirect: 'error', referrerPolicy: 'no-referrer' })
+    } catch {
+      throw new Error('PDF 直传连接失败，请重试。')
+    }
+    this.requireCurrentConnection(connection)
+    if (!uploaded.ok) throw new Error(`PDF 直传失败（HTTP ${uploaded.status}），请重试。`)
+    return this.requireOk(await request(`/api/library/${paperId}/pdf-upload/${grant.upload_id}`, {
+      method: 'POST',
+    }), '确认 PDF 保存')
+  },
+
   async openSelected(win) {
     const pane = Zotero.getActiveZoteroPane()
     let item = pane.getSelectedItems()[0]
@@ -299,22 +351,14 @@ var PaperMind = {
           const path = await att.getFilePathAsync()
           if (path) {
             const bytes = await win.IOUtils.read(path)
-            const fd = new win.FormData()
-            fd.append('file', new win.Blob([bytes], { type: 'application/pdf' }), 'paper.pdf')
-            this.requireCurrentConnection(connection)
-            const upResp = await win.fetch(`${base}/api/library/${saved.id}/pdf`, {
-              method: 'POST',
-              headers: this.requestHeaders({}, connection),
-              redirect: 'error', credentials: 'omit',
-              body: fd,
-            })
-            await this.requireOk(upResp, '上传 PDF')
+            const upResp = await this.uploadPdf(win, saved.id, bytes, connection)
             this.log('pdf upload HTTP ' + upResp.status)
           }
         }
       } catch (e) {
         if (e.code === 'CONNECTION_CHANGED') throw e
         this.log('pdf upload skipped: ' + e)
+        Services.prompt.alert(win, '研雀', '文献信息已保存，PDF 未上传。\n' + e.message + '\n可在即将打开的网页补传 PDF。')
       }
 
       // 3. 打开浏览器进入阅读页（?uid= 让新浏览器自动继承设备身份）

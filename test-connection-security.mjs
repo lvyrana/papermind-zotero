@@ -25,8 +25,8 @@ function fixture() {
     getCreators: () => [], getField: field => field === 'title' ? 'Synthetic paper' : '',
     getBestAttachment: async () => ({ attachmentContentType: 'application/pdf', getFilePathAsync: async () => '/synthetic.pdf' }) }
   const win = { URL, AbortController, setTimeout, clearTimeout, FormData, Blob, crypto: { randomUUID: () => NEXT_UID },
-    ZoteroPane: { getSelectedItems: () => [item] }, IOUtils: { read: async () => new Uint8Array([1, 2, 3]) },
-    fetch: async (url, options) => { requests.push({ url, options }); return { ok: true, status: 200, json: async () => ({ id: 7 }) } } }
+    ZoteroPane: { getSelectedItems: () => [item] }, IOUtils: { read: async () => new Uint8Array([37, 80, 68, 70, 45]) },
+    fetch: async (url, options) => { requests.push({ url, options }); return { ok: true, status: 200, json: async () => url.endsWith('/file-storage') ? { mode: 'server' } : { id: 7 } } } }
   sandbox.Zotero.getActiveZoteroPane = () => win.ZoteroPane
   return { pm: sandbox.PaperMind, account: sandbox.PaperMindAccount, services: sandbox.Services, prefs, requests, urls, alerts, item, win }
 }
@@ -79,15 +79,15 @@ for (const phase of ['metadata', 'attachment', 'upload']) {
         if (phase === 'upload' && url.endsWith('/pdf')) switchConnection()
         return { ok: true, status: 200, json: async () => {
           if (phase === 'metadata') switchConnection()
-          return { id: 7 }
+          return url.endsWith('/file-storage') ? { mode: 'server' } : { id: 7 }
         } }
       }
       f.win.IOUtils.read = async () => {
         if (phase === 'attachment') switchConnection()
-        return new Uint8Array([1, 2, 3])
+        return new Uint8Array([37, 80, 68, 70, 45])
       }
       await f.pm.openSelected(f.win)
-      assert.equal(f.requests.length, phase === 'upload' ? 2 : 1)
+      assert.equal(f.requests.length, phase === 'upload' ? 3 : 1)
       for (const { options } of f.requests) {
         assert.equal(options.headers['X-User-ID'], UID)
         assert.notEqual(options.headers.Authorization, 'Bearer synthetic-after')
@@ -103,7 +103,7 @@ test('ordinary import and PDF-error fallback keep the same connection credential
     const f = fixture()
     if (pdfError) f.win.IOUtils.read = async () => { throw new Error('Synthetic attachment read failure') }
     await f.pm.openSelected(f.win)
-    assert.equal(f.requests.length, pdfError ? 1 : 2)
+    assert.equal(f.requests.length, pdfError ? 1 : 3)
     assert.equal(f.urls.length, 1)
     assert.equal(f.urls[0], `${BASE}/paper/7?library=1&uid=${UID}`)
     for (const { options } of f.requests) {
@@ -111,7 +111,8 @@ test('ordinary import and PDF-error fallback keep the same connection credential
       assert.equal(options.credentials, 'omit')
       assert.equal(options.headers['X-User-ID'], UID)
     }
-    assert.deepEqual(f.alerts, [])
+    assert.equal(f.alerts.length, pdfError ? 1 : 0)
+    if (pdfError) assert.match(f.alerts[0], /文献信息已保存，PDF 未上传/)
   }
 })
 
@@ -119,7 +120,7 @@ test('unchanged account import uses its captured token and keeps credentials out
   const f = fixture()
   f.pm.account = { record: () => ({ token: 'synthetic-account-session', account: { data_uid: UID } }) }
   await f.pm.openSelected(f.win)
-  assert.equal(f.requests.length, 2)
+  assert.equal(f.requests.length, 3)
   assert.deepEqual(f.urls, [`${BASE}/paper/7?library=1`])
   for (const { options } of f.requests) assert.equal(options.headers.Authorization, 'Bearer synthetic-account-session')
   assert.deepEqual(f.alerts, [])
