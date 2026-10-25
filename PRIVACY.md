@@ -1,5 +1,26 @@
 # LitFinch for Zotero 隐私政策
 
+## 当前政策：0.8.0 预发布（2026-10-25）
+
+新阅读记录由使用者在本机保管。公共免费 AI 已停止，新版插件不再把阅读请求交给维护者转发。
+
+PDF 留在 Zotero；卡片、带读、对话、自测、汇报与已保存草稿位于 Zotero 配置目录的 `papermind-reading/`，受操作系统账户保护，未额外加密，也不随 Zotero 文库自动同步。升级保留原文件路径和身份标识。保存到 Zotero 子笔记的内容遵循用户自己的同步与群组设置。
+
+API 地址、模型与连接方式保存在首选项；API 密钥保存在本机 Zotero / Firefox Login Manager，独立于旧网站会话。只有点击 AI 操作时，才把当前任务需要的题名、摘要、当前页、选段、相关正文节选和近期对话或卡片直接发送给个人配置的服务。检查连接只读取模型列表。研雀不接收或备份这些新内容；AI 提供商对接收的文字适用其自身政策，本地保存不等于模型离线。
+
+Codex 使用官方 CLI app-server 与官方 ChatGPT 登录，消耗本人订阅的 Codex 额度。凭据由官方客户端存入系统钥匙串，使用独立 `papermind-codex/` 目录，不读取已有编程会话和认证缓存。阅读使用临时会话，关闭历史保存、shell、浏览器、应用连接、插件、记忆和多 agent 能力，并限制文件与网络工具权限。官方客户端可能在独立目录写运行诊断，目录属于个人应用数据。
+
+本篇 JSON 导出包含阅读记录，不含 PDF、API 密钥或登录凭据。恢复核对 Zotero 条目 key，先保留恢复前的副本，再写入。换电脑前需自行保存备份，PDF 和文库使用自己的 Zotero 备份方法。卸载不自动删除文件；清理时关闭 Zotero 后将 `papermind-reading/` 移至废纸篓。API 密钥用「移除本机密钥」删除，Codex 用「退出 Codex」退出本插件的登录。
+
+旧版网站的数据库、附件与历史备份没有被此次升级自动删除，仍可在原账号下查看、导出、下载和删除。云端 JSON 不含二进制附件，不能直接作为插件本篇恢复包。网站访问仍可能产生时间、IP 和接口路径等基础设施日志。默认公共站的右键入口转为本地阅读；已有其他自建研雀服务连接保留原上传流程，只有主动导入才向该服务发送所选元数据与 PDF。
+
+携带密钥的请求拒绝自动重定向，远程服务须使用 HTTPS；本机模型允许 loopback HTTP。未配置或服务失败时不会回退公共额度。安全问题见 [SECURITY.md](SECURITY.md)。当前版真实登录与原生安装验收范围见 [Release 说明](RELEASE_NOTES.md)。
+
+**English summary:** New records stay in the user's Zotero profile. Personal API requests go directly to the selected provider; Codex uses its official app-server and the user's ChatGPT subscription. Credentials are excluded from reading backups. Legacy website records and historical backups remain until separately exported/deleted. Existing self-hosted connections retain their explicit upload flow.
+
+<details>
+<summary>历史政策：0.7.x 及更早版本（不适用于 0.8.0 的个人 AI 路径）</summary>
+
 更新日期：2026-10-22（0.7.0 已预发布并完成 macOS / Zotero 9.0.6 账号验收；云端 PDF 直传为尚未发布的迁移开发改动）
 
 本政策适用于研雀 · LitFinch 的 Zotero 插件。插件把用户主动选择的文献发送到用户配置的研雀服务；它不是 Zotero 官方组件，Zotero 的隐私政策与本政策分别适用。
@@ -80,3 +101,5 @@
 ## English Summary
 
 LitFinch for Zotero uploads only the Zotero item explicitly selected by the user, including its metadata, best available PDF attachment and an anonymous device identifier. It does not scan or upload the full Zotero library. Paper content and prompts may be sent to third-party AI providers configured by the LitFinch service. Server data is retained until item deletion or a verified deletion request; no uniform automatic retention period is promised during the public beta. Do not use the service for patient-identifiable, confidential or unauthorized content.
+
+</details>

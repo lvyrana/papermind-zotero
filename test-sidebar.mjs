@@ -37,6 +37,11 @@ const fixture = () => {
       return { ok: true, json: async () => ({ ok: true, guide: 'A sourced explanation.', reply: 'Follow-up answer.', translated: '翻译结果。' }) }
     } }
   const sidebar = context.PaperMindSidebar
+  context.PaperMind.ai = { ensure: async () => true, request: async (win, endpoint, payload, signal) => {
+    const response = await win.fetch('https://synthetic-ai.test' + endpoint, { body: JSON.stringify(payload), signal, headers: {}, redirect: 'error' })
+    if (!response.ok) throw new Error('HTTP ' + response.status)
+    return response.json()
+  } }
   const session = sidebar.sessionFor(paper)
   session.source = sidebar.captureSource(attachment, { text: 'The observed effect was uncertain.', position: { pageIndex: 2 }, pageLabel: 'iii' })
   return { sidebar, session, paper, attachment, win, calls, notes, prefs, Zotero, context }
@@ -182,14 +187,14 @@ test('source navigation uses the native reader without an external protocol prom
   assert.match(f.session.error, /原文附件已移除/)
 })
 
-test('selection explanation uses the existing API without uploading a PDF or saving a server item', async () => {
+test('selection explanation delegates to personal AI without uploading a PDF or saving a server item', async () => {
   const f = fixture()
   await f.sidebar.run(f.session, 'guide', f.win)
   assert.equal(f.calls.length, 1)
   assert.match(f.calls[0].url, /\/api\/deep-read\/guide$/)
   assert.equal(f.calls[0].payload.mode, 'selection')
   assert.equal(f.calls[0].payload.page, 3)
-  assert.equal(f.calls[0].headers['X-User-ID'], f.prefs.get('extensions.papermind.uid'))
+  assert.equal(f.calls[0].headers['X-User-ID'], undefined)
   assert.equal(f.calls[0].redirect, 'error')
   assert.equal(f.session.messages[1].content, 'A sourced explanation.')
   assert.equal(f.session.busy, false)

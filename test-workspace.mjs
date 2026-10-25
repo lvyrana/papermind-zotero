@@ -26,11 +26,37 @@ function fixture(files = new Map()) {
     writeJSON: async (path, data, options) => { writes.push({ path, options }); files.set(path, JSON.stringify(data)) } }
   const ctx = vm.createContext({ Zotero, Services: { prompt: {} }, Components: {}, URL, IOUtils: io, PathUtils: { join: (...args) => args.join('/') }, Uint8Array })
   for (const file of ['bootstrap.js', 'sidebar.js', 'reader-context.js', 'workspace.js']) vm.runInContext(fs.readFileSync(new URL(file, import.meta.url), 'utf8'), ctx)
+  ctx.PaperMind.ai = { ensure: async () => true, request: async (win, endpoint, payload, signal) => {
+    const response = await win.fetch('https://synthetic-ai.test' + endpoint, { body: JSON.stringify(payload), signal })
+    return response.json()
+  } }
   const sidebar = ctx.PaperMindSidebar, workspace = ctx.PaperMindWorkspace, context = ctx.PaperMindReaderContext
   workspace.install(sidebar); sidebar.workspace = workspace
   const session = sidebar.sessionFor(paper)
   return { ctx, sidebar, workspace, context, session, win, paper, attachment, reader, app, pdf, texts, requests, notes, prefs, files, writes, io, reads: () => reads }
 }
+
+test('portable reading export excludes credentials and restore keeps the previous revision', async () => {
+  const f = fixture(); await f.workspace.load(f.session)
+  f.workspace.state(f.session).cards = [{ content: 'Keep this', id: 'card-1', noteID: 999 }]
+  f.session.draft = 'Unfinished question'
+  await f.workspace.persist(f.session)
+  const packet = JSON.parse(JSON.stringify(f.workspace.backup(f.session)))
+  assert.equal(packet.record.draft, 'Unfinished question')
+  assert.doesNotMatch(JSON.stringify(packet), /apiKey|token|data_uid|123e4567/)
+  f.io.copy = async (from, to) => f.files.set(to, f.files.get(from))
+  f.workspace.state(f.session).cards[0].content = 'Newer state'
+  await f.workspace.persist(f.session)
+  await f.workspace.restore(f.session, packet)
+  assert.equal(f.workspace.state(f.session).cards[0].content, 'Keep this')
+  assert.equal(f.workspace.state(f.session).cards[0].noteID, undefined)
+  const previous = [...f.files].find(([name]) => name.includes('before-restore'))
+  assert.match(previous[1], /Newer state/)
+  packet.paper.key = '../other'
+  await assert.rejects(f.workspace.restore(f.session, packet), /不匹配/)
+  packet.paper.key = f.paper.key; packet.record.cards = [{ content: 123 }]
+  await assert.rejects(f.workspace.restore(f.session, packet), /无效/)
+})
 
 test('start hint waits for local records and recommends the abstract without network or writes', async () => {
   const f = fixture(), active = f.context.active(f.win, f.paper)

@@ -140,6 +140,79 @@ var PaperMindWorkspace = {
     w.mode = 'read'; session.status = '已存为本篇卡片。'; this.sidebar.refresh(session)
   },
 
+  backup(session) {
+    const w = this.state(session)
+    if (!w.loaded || w.storageError) throw new Error('本地记录尚未成功载入或保存，请先处理保存错误。')
+    return { format: 'litfinch-reading', version: 1, exportedAt: new Date().toISOString(),
+      paper: { key: session.paper.key, title: session.paper.getField('title') },
+      record: { version: 1, cards: w.cards, board: w.board, messages: session.messages, guide: w.guide,
+        quiz: w.quiz, draft: session.draft } }
+  },
+
+  validateBackup(packet, session) {
+    if (packet?.format !== 'litfinch-reading' || packet.version !== 1 || packet.paper?.key !== session.paper.key) {
+      throw new Error('备份格式或 Zotero 条目编号不匹配。请打开原条目后恢复。')
+    }
+    const data = packet.record
+    if (!data || data.version !== 1 || typeof data.draft !== 'string' || data.draft.length > 100000) throw new Error('阅读备份内容无效。')
+    const clean = value => {
+      if (!value || typeof value.content !== 'string' || value.content.length > 200000) throw new Error('阅读备份中的文字记录无效。')
+      const next = { content: value.content }
+      for (const key of ['id', 'question', 'display', 'coverage', 'origin', 'section', 'createdAt']) if (typeof value[key] === 'string') next[key] = value[key].slice(0, 10000)
+      if (['user', 'assistant'].includes(value.role)) next.role = value.role
+      const source = value.source
+      if (source && typeof source.text === 'string' && /^[A-Z0-9]{8}$/.test(source.attachmentKey || '')) {
+        next.source = { text: source.text.slice(0, 50000), attachmentKey: source.attachmentKey,
+          libraryID: session.paper.libraryID, page: Number.isInteger(source.page) && source.page > 0 ? source.page : null }
+      }
+      return next
+    }
+    const result = { version: 1, draft: data.draft, guide: data.guide ? clean(data.guide) : null, boardExport: null }
+    for (const key of ['cards', 'board', 'messages', 'quiz']) {
+      if (!Array.isArray(data[key]) || data[key].length > 10000) throw new Error('阅读备份记录列表无效。')
+      result[key] = data[key].map(clean)
+    }
+    return result
+  },
+
+  async restore(session, packet) {
+    const data = this.validateBackup(packet, session), w = this.state(session)
+    if (!w.loaded || session.busy) throw new Error('请等待当前操作完成后恢复。')
+    await w.writeQueue
+    const path = await this.path(session)
+    // Keep the previous state even when the user restores the wrong revision.
+    if (await IOUtils.exists(path)) await IOUtils.copy(path, path + '.before-restore-' + Date.now() + '.json', { noOverwrite: true })
+    await IOUtils.writeJSON(path, data, { tmpPath: path + '.tmp', mode: 'overwrite', permissions: 0o600 })
+    Object.assign(w, { cards: data.cards, board: data.board, guide: data.guide, quiz: data.quiz, boardExport: null, storageError: '' })
+    session.messages = data.messages; session.draft = data.draft
+    this.sidebar.refresh(session)
+  },
+
+  async transfer(session, win, importing) {
+    try {
+      await this.load(session)
+      const { FilePicker } = ChromeUtils.importESModule('chrome://zotero/content/modules/filePicker.mjs')
+      const picker = new FilePicker()
+      picker.init(win, importing ? '恢复本篇阅读记录' : '导出本篇阅读记录', importing ? picker.modeOpen : picker.modeSave)
+      picker.appendFilter('研雀阅读记录', '*.json'); picker.defaultExtension = 'json'
+      picker.defaultString = `litfinch-${session.paper.key}.json`
+      if (await picker.show() === picker.returnCancel) return
+      if (importing) {
+        if ((await IOUtils.stat(picker.file)).size > 15 * 1024 * 1024) throw new Error('备份文件超过 15 MB，未导入。')
+        const packet = await IOUtils.readJSON(picker.file)
+        this.validateBackup(packet, session)
+        if (!Services.prompt.confirm(win, '恢复阅读记录', '用所选备份恢复当前论文的阅读记录？当前记录会另存一份本机备份。')) return
+        await this.restore(session, packet)
+        session.status = '已恢复本篇阅读记录，恢复前的副本保留在本机。'
+      } else {
+        await this.state(session).writeQueue
+        await IOUtils.writeJSON(picker.file, this.backup(session), { tmpPath: picker.file + '.tmp', mode: 'overwrite', permissions: 0o600 })
+        session.status = '已导出本篇阅读记录；文件不含 API 密钥、登录凭据或 PDF。'
+      }
+    } catch (error) { session.error = error.message }
+    this.sidebar.refresh(session)
+  },
+
   async toBoard(session, item, section) {
     await this.load(session)
     const w = this.state(session)
@@ -180,7 +253,7 @@ var PaperMindWorkspace = {
       await this.load(session)
       if (!w.loaded) throw new Error(w.storageError)
       if (!current()) return
-      if (!await PaperMind.ensureConnection(win)) return
+      if (!await PaperMind.ai.ensure(win)) return
       if (!current()) return
       if (action === 'chat' && !prompt) throw new Error('先写下想问的问题。')
       if (action === 'quizAnswer' && (!prompt || !w.quiz.length)) throw new Error('先回答当前自测问题。')
@@ -212,11 +285,7 @@ var PaperMindWorkspace = {
         paper_pages: (context.pages + (cards ? '\n[个人阅读卡片，可能含推断，需回原文核对]\n' + cards : '')).slice(0, 24000),
         quote: source ? { text: source.text.slice(0, 4000), page: source.page } : null }
       session.status = '正在生成…'; w.coverage = context.coverage; this.sidebar.refresh(session)
-      const response = await win.fetch(PaperMind.getBaseURL() + '/api/chat', {
-        method: 'POST', headers: PaperMind.requestHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify(payload), signal: controller.signal, redirect: 'error', credentials: 'omit' })
-      await PaperMind.requireOk(response, '生成')
-      const data = await response.json()
+      const data = await PaperMind.ai.request(win, '/api/chat', payload, controller.signal)
       if (!current()) return
       if (!data.ok || !data.reply) throw new Error(data.error || data.reply || '没有收到内容，请重试。')
       const pageSource = activeSnapshot && context.page ? { text: context.currentText, page: context.page,
@@ -269,7 +338,7 @@ var PaperMindWorkspace = {
     const line = el('div', null, head, 'pmw-row')
     el('strong', '研雀 · 阅读台', line)
     const tools = el('div', null, line)
-    if (PaperMind.account) button(tools, PaperMind.account.record() ? '账号' : '登录', () => {
+    if (PaperMind.ai) button(tools, '连接 AI', () => {
       this.state(session).mode = 'settings'; sidebar.refresh(session)
     }, !session)
     button(tools, '设置', () => { const w = this.state(session); w.mode = w.mode === 'settings' ? 'read' : 'settings'; sidebar.refresh(session) }, !session)
@@ -292,7 +361,9 @@ var PaperMindWorkspace = {
     }
     if (w.mode !== 'read') button(content, '← 返回阅读台', () => mode('read'))
     if (w.mode === 'settings') {
-      if (PaperMind.account) {
+      PaperMind.ai?.render(win, content, el, button, () => sidebar.refresh(session))
+      const SHOW_LEGACY_ACCOUNT = false
+      if (SHOW_LEGACY_ACCOUNT && PaperMind.account) {
         const account = PaperMind.account.record()?.account
         el('h3', '研雀账号', content)
         el('p', account ? `已登录：${account.username}` : '使用 Zotero 账号连接网站与插件，本地卡片无需登录。', content)
@@ -302,10 +373,12 @@ var PaperMindWorkspace = {
         if (account) button(content, '退出账号', () => PaperMind.account.logout(win))
       }
       el('h3', '连接与数据', content)
-      el('p', 'PDF 在本地读取。点击 AI 操作时发送题名、摘要、当前页、选段和有页码的相关文字节选；不上传 PDF 文件。', content)
-      el('p', '卡片、对话、自测和汇报保存在本机 Zotero 配置目录，按论文和连接身份隔离；不会自动同步到网页版。', content)
+      el('p', 'PDF 在本地读取。点击 AI 操作时向个人配置的服务发送题名、摘要、当前页、选段和相关文字节选；不上传 PDF 文件。', content)
+      el('p', '卡片、对话、自测和汇报保存在本机 Zotero 配置目录。研雀不备份这些记录；导出的文件由使用者自行保存。保存到 Zotero 笔记的内容遵循 Zotero 自身的同步设置。', content)
+      button(content, '导出本篇完整阅读记录', () => this.transfer(session, win, false), busy)
+      button(content, '恢复本篇阅读记录', () => this.transfer(session, win, true), busy)
       el('p', w.coverage || '尚未发起 AI 操作。', content, 'pmw-muted')
-      button(content, '旧版专属链接设置', async () => { await PaperMind.promptSettings(win); sidebar.syncWindow(win) }, session.busy || Boolean(PaperMind.account?.record()) || Boolean(PaperMind.account?.pending))
+      if (SHOW_LEGACY_ACCOUNT) button(content, '旧版专属链接设置', async () => { await PaperMind.promptSettings(win); sidebar.syncWindow(win) }, session.busy || Boolean(PaperMind.account?.record()) || Boolean(PaperMind.account?.pending))
     } else if (w.mode === 'board') {
       el('h3', '单篇汇报', content)
       for (const section of this.boardSections) {

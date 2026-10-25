@@ -312,6 +312,10 @@ var PaperMind = {
   },
 
   async openSelected(win) {
+    if (this.getBaseURL() === this.DEFAULT_BASE) {
+      this.sidebar?.focusPane(win)
+      return
+    }
     const pane = Zotero.getActiveZoteroPane()
     let item = pane.getSelectedItems()[0]
     if (!item) {
@@ -392,7 +396,11 @@ var PaperMind = {
       const mi = doc.createXULElement('menuitem')
       mi.id = this.TOOLS_ID
       mi.setAttribute('label', '研雀连接设置…')
-      mi.addEventListener('command', () => { void this.promptSettings(win) })
+      mi.addEventListener('command', () => {
+        this.sidebar?.focusPane(win)
+        const session = this.sidebar?.sessionFor(this.sidebar.activeItem(win))
+        if (session && this.sidebar.workspace) { this.sidebar.workspace.state(session).mode = 'settings'; this.sidebar.refresh(session) }
+      })
       toolsMenu.appendChild(mi)
     }
   },
@@ -415,13 +423,17 @@ async function startup({ rootURI }) {
   await Zotero.initializationPromise
   PaperMind.migrateLegacyConfig()
   try {
-    const scope = { Zotero, Services, PaperMind, Components }
+    const scope = { Zotero, Services, PaperMind, Components, ChromeUtils, URL: Zotero.getMainWindow().URL }
     // Privileged Firefox globals are used only for local reading records.
     if (typeof IOUtils === 'undefined') Components.utils.importGlobalProperties(['IOUtils', 'PathUtils'])
     scope.IOUtils = IOUtils
     scope.PathUtils = PathUtils
     Services.scriptloader.loadSubScript(rootURI + 'account.js', scope)
     PaperMind.account = scope.PaperMindAccount
+    Services.scriptloader.loadSubScript(rootURI + 'codex.js', scope)
+    PaperMind.codex = scope.PaperMindCodex
+    Services.scriptloader.loadSubScript(rootURI + 'ai.js', scope)
+    PaperMind.ai = scope.PaperMindAI
     if (!PaperMind.isValidUid(Zotero.Prefs.get(PaperMind.PREF_UID, true))) {
       Zotero.Prefs.set(PaperMind.PREF_UID, Zotero.getMainWindow().crypto.randomUUID(), true)
       // New local-only identity must not be mistaken for an old configured service on restart.
@@ -453,6 +465,7 @@ function onMainWindowUnload({ window }) {
 }
 
 function shutdown() {
+  void PaperMind.codex?.stop()
   PaperMind.account?.dispose()
   PaperMind.sidebar?.destroy()
   if (typeof Zotero !== 'undefined') {

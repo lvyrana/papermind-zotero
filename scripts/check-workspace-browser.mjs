@@ -43,7 +43,10 @@ try {
     }
   })
   for (const file of ['bootstrap.js', 'sidebar.js', 'reader-context.js', 'workspace.js']) await page.addScriptTag({ path: fileURLToPath(new URL('../' + file, import.meta.url)) })
-  await page.evaluate(() => { PaperMindWorkspace.install(PaperMindSidebar); PaperMindSidebar.workspace = PaperMindWorkspace; PaperMindSidebar.init('file:///mock/') })
+  await page.evaluate(() => {
+    PaperMind.ai = { ensure: async () => true, request: async (win, endpoint, payload) => (await win.fetch('https://synthetic-ai.test' + endpoint, { body: JSON.stringify(payload) })).json() }
+    PaperMindWorkspace.install(PaperMindSidebar); PaperMindSidebar.workspace = PaperMindWorkspace; PaperMindSidebar.init('file:///mock/')
+  })
   await page.getByRole('button', { name: '研雀阅读台', exact: true }).click()
   await page.getByText('本机阅读记录', { exact: true }).waitFor()
   const hint = page.getByLabel('阅读起步提示', { exact: true })

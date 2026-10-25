@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "研雀 · LitFinch",
-  "version": "0.7.1",
-  "description": "研雀论文阅读台：在 Zotero 中带读、翻译、追问、整理卡片与汇报；保留网页精读入口",
+  "version": "0.8.0",
+  "description": "研雀本地阅读台：个人 API 或 Codex 连接 AI，阅读记录自行保存、导出与恢复",
   "author": "雀雀",
   "homepage_url": "https://papermindapp.com",
   "icons": {

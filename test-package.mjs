@@ -23,7 +23,7 @@ function fixture(run) {
 
 test('release package retains all source bytes and both license documents', () => fixture((root, xpi) => {
   const report = auditPackage(root, xpi)
-  assert.equal(report.files, 11)
+  assert.equal(report.files, members.length)
   assert.equal(report.version, '0.7.0')
   assert.match(report.runtime_sha256, /^[a-f0-9]{64}$/)
   assert.ok(report.sha256.LICENSE)

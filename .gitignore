@@ -6,3 +6,4 @@
 
 # Trial archives are local distribution artifacts, not source.
 *.zip
+node_modules/

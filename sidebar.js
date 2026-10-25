@@ -390,17 +390,12 @@ var PaperMindSidebar = {
         result.textContent = '这里显示所选英文的中文译文。原文保持可见，翻译留在阅读页面，不打开侧栏。\n\n这是布局示例，未调用 AI。'
         return
       }
-      if (!await PaperMind.ensureConnection(win)) { state.close(); return }
+      if (!await PaperMind.ai.ensure(win)) { state.close(); return }
       if (closed) return
       identity = [PaperMind.getBaseURL(), PaperMind.getUid()].join('|')
       if (!source.text || source.text.length > 3000) throw new Error('请选择 3000 字以内的原文再翻译。')
       timer = win.setTimeout(() => controller.abort(), 90000)
-      const response = await win.fetch(PaperMind.getBaseURL() + '/api/translate', {
-        method: 'POST', headers: PaperMind.requestHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ text: source.text }), signal: controller.signal, redirect: 'error', credentials: 'omit',
-      })
-      await PaperMind.requireOk(response, '翻译')
-      const data = await response.json()
+      const data = await PaperMind.ai.request(win, '/api/translate', { text: source.text }, controller.signal)
       if (closed) return
       if (identity !== [PaperMind.getBaseURL(), PaperMind.getUid()].join('|')) { state.close(); return }
       if (!data.ok || !data.translated) throw new Error(data.error || '没有收到译文，请重试。')
@@ -626,7 +621,7 @@ var PaperMindSidebar = {
     const requestID = ++session.request
     let timer
     try {
-      if (!await PaperMind.ensureConnection(win)) return
+      if (!await PaperMind.ai.ensure(win)) return
       const current = this.sessionFor(session.paper)
       if (current !== session) {
         session.error = '连接身份已改变，请在当前侧栏重新发起。'
@@ -660,12 +655,7 @@ var PaperMindSidebar = {
       session.status = '正在生成，可停止等待。'
       this.refresh(session)
       timer = win.setTimeout(() => controller.abort(), 90000)
-      const response = await win.fetch(PaperMind.getBaseURL() + endpoint, {
-        method: 'POST', headers: PaperMind.requestHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify(payload), signal: session.controller.signal, redirect: 'error', credentials: 'omit',
-      })
-      await PaperMind.requireOk(response, '生成')
-      const data = await response.json()
+      const data = await PaperMind.ai.request(win, endpoint, payload, session.controller.signal)
       if (!data.ok || !data[field]) throw new Error(data.error || data.reply || '没有收到内容，可重新发送。')
       if (requestID !== session.request || this.sessionFor(session.paper) !== session) return
       const question = action === 'chat' ? prompt : { guide: '精读这段', translate: '翻译这段', abstract: '精读摘要' }[action]

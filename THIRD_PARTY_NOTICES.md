@@ -1,4 +1,10 @@
-# Third-party notices — LitFinch for Zotero 0.7.0
+# Third-party notices — LitFinch for Zotero 0.8.0
+
+Optional Codex integration communicates with the separately installed official
+OpenAI Codex CLI through its app-server protocol. The CLI, OAuth credentials and
+native runtime are not redistributed in the XPI. See https://github.com/openai/codex
+for the upstream source and license. API and ChatGPT subscription services are
+provided under the user's own provider account and terms.
 
 ## Distributed XPI
 
