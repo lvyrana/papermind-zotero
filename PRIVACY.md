@@ -1,105 +1,33 @@
-# LitFinch for Zotero 隐私政策
+# 研雀 · LitFinch 隐私说明
 
-## 当前政策：0.8.0 预发布（2026-10-25）
+适用版本：0.8.0 · 更新日期：2026-10-25
 
-新阅读记录由使用者在本机保管。公共免费 AI 已停止，新版插件不再把阅读请求交给维护者转发。
+## 本地保存
 
-PDF 留在 Zotero；卡片、带读、对话、自测、汇报与已保存草稿位于 Zotero 配置目录的 `papermind-reading/`，受操作系统账户保护，未额外加密，也不随 Zotero 文库自动同步。升级保留原文件路径和身份标识。保存到 Zotero 子笔记的内容遵循用户自己的同步与群组设置。
+PDF 由 Zotero 管理。卡片、带读、对话、自测、汇报和已保存草稿位于 Zotero 配置目录的 `papermind-reading/`，以本机账户可读取的 JSON 文件保存，由操作系统账户保护。阅读记录通过插件的导出与恢复功能备份；保存到 Zotero 子笔记的内容按个人 Zotero 同步与群组设置处理。
 
-API 地址、模型与连接方式保存在首选项；API 密钥保存在本机 Zotero / Firefox Login Manager，独立于旧网站会话。只有点击 AI 操作时，才把当前任务需要的题名、摘要、当前页、选段、相关正文节选和近期对话或卡片直接发送给个人配置的服务。检查连接只读取模型列表。研雀不接收或备份这些新内容；AI 提供商对接收的文字适用其自身政策，本地保存不等于模型离线。
+连接方式、API 地址和模型名保存在首选项；API 密钥保存在本机 Zotero / Firefox Login Manager。Codex 登录凭据由官方客户端存入系统钥匙串，使用插件独立的 `papermind-codex/` 目录。
 
-Codex 使用官方 CLI app-server 与官方 ChatGPT 登录，消耗本人订阅的 Codex 额度。凭据由官方客户端存入系统钥匙串，使用独立 `papermind-codex/` 目录，不读取已有编程会话和认证缓存。阅读使用临时会话，关闭历史保存、shell、浏览器、应用连接、插件、记忆和多 agent 能力，并限制文件与网络工具权限。官方客户端可能在独立目录写运行诊断，目录属于个人应用数据。
+## AI 请求
 
-本篇 JSON 导出包含阅读记录，不含 PDF、API 密钥或登录凭据。恢复核对 Zotero 条目 key，先保留恢复前的副本，再写入。换电脑前需自行保存备份，PDF 和文库使用自己的 Zotero 备份方法。卸载不自动删除文件；清理时关闭 Zotero 后将 `papermind-reading/` 移至废纸篓。API 密钥用「移除本机密钥」删除，Codex 用「退出 Codex」退出本插件的登录。
+点击带读、追问、自测或翻译等 AI 操作时，当前任务需要的题名、摘要、页码、选段、正文节选及相关对话或卡片直接发送到个人选择的 AI 服务。PDF 文件留在 Zotero。AI 提供商按自己的数据政策处理接收的文字；研雀维护者的服务器退出这条调用链。
 
-旧版网站的数据库、附件与历史备份没有被此次升级自动删除，仍可在原账号下查看、导出、下载和删除。云端 JSON 不含二进制附件，不能直接作为插件本篇恢复包。网站访问仍可能产生时间、IP 和接口路径等基础设施日志。默认公共站的右键入口转为本地阅读；已有其他自建研雀服务连接保留原上传流程，只有主动导入才向该服务发送所选元数据与 PDF。
+「检查连接」读取服务的模型列表。个人 API 使用 HTTPS；本机模型可使用 loopback HTTP。携带凭据的请求要求服务直接响应，连接错误在阅读台显示。
 
-携带密钥的请求拒绝自动重定向，远程服务须使用 HTTPS；本机模型允许 loopback HTTP。未配置或服务失败时不会回退公共额度。安全问题见 [SECURITY.md](SECURITY.md)。当前版真实登录与原生安装验收范围见 [Release 说明](RELEASE_NOTES.md)。
+Codex 使用官方 CLI app-server 和官方 ChatGPT 登录，额度属于本人订阅。阅读任务采用临时会话与限定权限，文件、命令和联网工具保持关闭。官方客户端的运行诊断保存在个人应用数据目录。
 
-**English summary:** New records stay in the user's Zotero profile. Personal API requests go directly to the selected provider; Codex uses its official app-server and the user's ChatGPT subscription. Credentials are excluded from reading backups. Legacy website records and historical backups remain until separately exported/deleted. Existing self-hosted connections retain their explicit upload flow.
+## 备份、恢复与清理
 
-<details>
-<summary>历史政策：0.7.x 及更早版本（不适用于 0.8.0 的个人 AI 路径）</summary>
+「导出本篇完整阅读记录」生成仅包含阅读记录的 JSON。PDF、API 密钥与登录凭据分别由 Zotero、Login Manager 和系统钥匙串管理。恢复时核对 Zotero 条目 key，先保留当前文件副本，再写入记录。换电脑前保存备份，并单独处理 Zotero 文库与 PDF。
 
-更新日期：2026-10-22（0.7.0 已预发布并完成 macOS / Zotero 9.0.6 账号验收；云端 PDF 直传为尚未发布的迁移开发改动）
+卸载后，本地阅读文件继续保留。清理记录时先关闭 Zotero，再将 `papermind-reading/` 移至废纸篓；密钥通过「移除本机密钥」清理，Codex 登录通过「退出 Codex」结束。
 
-本政策适用于研雀 · LitFinch 的 Zotero 插件。插件把用户主动选择的文献发送到用户配置的研雀服务；它不是 Zotero 官方组件，Zotero 的隐私政策与本政策分别适用。
+## 旧网站资料与自建服务
 
-## 1. 插件在本地保存什么
+旧网站资料保留在原云端空间，可用原账号查看、导出、下载和删除。云端 JSON 用作个人档案，PDF 与图表分别下载；插件恢复入口使用本篇导出的备份文件。历史备份按原维护流程保留和轮换。访问网站会产生时间、IP 和接口路径等基础设施日志。
 
-插件在 Zotero 首选项中保存：研雀服务地址、匿名设备 ID 和配置版本。旧版曾保存共享预览凭据；`0.3.0` 会清除这些旧字段。
+默认公共站的插件入口打开本地阅读台。连接自建研雀服务的使用者主动导入时，所选文献元数据与 PDF 发送到自己的服务。
 
-0.7.0 登录后还会在 Zotero/Firefox Login Manager 保存研雀会话凭据和账号标识，不在首选项、浏览器跳转 URL 或阅读文件中保存会话秘密。该凭据不是 Zotero 密码或 Zotero 文库 API Key。退出时向服务撤销当前会话；撤销失败会提示并保留凭据供重试。
+[安全反馈](SECURITY.md) · [版本说明](RELEASE_NOTES.md) · [0.7.1 历史政策](https://github.com/lvyrana/papermind-zotero/blob/v0.7.1/PRIVACY.md)
 
-0.6.0 阅读台在 Zotero 配置目录的 `papermind-reading/` 中保存本篇卡片、带读结果、对话、已提交自测、汇报与已保存草稿。文件名是服务地址、身份及论文标识的 SHA-256 摘要，不包含明文凭据；文件内容可能包含论文选段和个人笔记。本地文件未额外加密，受操作系统账户保护，不随 Zotero 文库自动同步。
-
-专属链接中的设备 ID 相当于当前测试阶段的身份凭据。任何得到该链接的人都可能访问同一身份下的数据，请勿公开转发或粘贴到 GitHub Issue。
-
-明确关联旧身份到账号后，旧链接不再单独授权访问服务器记录。账号会话最长有效 30 天，登录请求及一次性连接码有效 10 分钟。插件本地阅读文件仍由操作系统保护，不因网站登录而加密或云同步。
-
-## 2. 什么时候会发送数据
-
-点击账号登录会向研雀发送现有设备标识，领取一次性连接码。浏览器在 Zotero 官方页面完成 `identity=1` 身份确认；研雀获得 Zotero 用户数字 ID 和用户名，不请求云端文库读取/写入权限。插件通过短期轮询接收自己的研雀会话。服务端保存账号与数据归属、会话哈希及限流记录，备份包含账号归属；恢复备份会撤销旧会话。此流程不发送论文或卡片。
-
-用户主动选择 Zotero 条目并点击「用研雀精读」时，插件会发送当前条目的：
-
-- 题名、作者、期刊、日期、DOI、PMID、摘要等文献元数据；
-- 当前条目可访问的最佳 PDF 附件；
-- 匿名设备 ID，用于区分不同用户的数据。
-
-插件不会自动上传整个 Zotero 文库，也不会在后台遍历其他条目。
-
-迁移开发版连接支持直传的服务时，PDF 字节会从插件直接发送到该研雀部署的 Vercel 私有 Blob 存储，元数据和完成确认仍发给研雀。上传许可限定单文件、大小与有效期；存储请求不包含研雀账号会话、Cookie 或引用地址。当前只向迁移预览上传合成文件，真实数据尚未迁入；旧服务器继续接收原有 multipart 上传。
-
-`0.4.0` 的原生精读侧栏在点击「读摘要」「精读这段」「翻译」或发送问题时，会发送相关题名、摘要、选段、页码、问题与最近的对话上下文，以及已配置的匿名设备 ID。该路径不上传整份 PDF，也不自动建立服务器收藏。服务仍可能按既有策略记录请求、用量与必要诊断信息。
-
-0.6.0 带读、追问和自测还会读取当前打开 PDF 的本地文字层，在点击 AI 操作时发送当前页及带页码的相关文字节选，自测可包含个人阅读卡片。仅处理当前论文，不扫描其他条目。长文节选有范围说明；此路径不上传 PDF 文件。0.4–0.5 的对话仅在内存中；0.6 的记录按第 1 节持久保存。
-
-点击「存为 Zotero 笔记」或「保存汇报到 Zotero 笔记」会创建当前文献的子笔记；笔记遵循用户的 Zotero 同步配置，可能同步至 Zotero 或所属群组，不限于本机。
-
-## 3. 研雀服务可能保存什么
-
-研雀服务可能保存用户发送的文献元数据、PDF，以及后续在网页端产生的阅读记录、划词、卡片、笔记、对话、汇报板、自测记录和反馈。服务器基础设施还可能生成包含请求时间、接口路径、IP 地址和浏览器信息的标准访问日志。
-
-这些数据用于提供精读、恢复阅读进度、生成内容、故障排查、限额控制和产品改进，不用于出售个人信息。
-
-## 4. 第三方 AI 服务
-
-当用户在研雀中使用精读、问答、卡片起草或自测等 AI 功能时，相关论文内容、选中文本、问题和必要上下文可能发送给服务运营者配置的第三方模型提供商。具体提供商可能随部署配置和故障回退策略变化。
-
-请勿使用研雀处理患者身份信息、未公开敏感研究数据、机构机密，或用户无权上传和处理的文献。
-
-## 5. 保存与删除
-
-当前公开测试阶段尚未承诺统一的自动删除期限。数据通常保留到用户主动删除对应条目，或提出完整删除请求为止；备份中的副本可能在备份轮换完成前继续存在。
-
-卸载插件或清除浏览器中的设备 ID 不会自动删除服务器数据。需要删除当前匿名身份下的全部数据时，请在研雀「设置 → 用户反馈」中提交删除请求；反馈会自动关联当前设备身份，无需在正文中填写专属链接或设备 ID。
-
-卸载不会自动删除本地 `papermind-reading/`。需要清理本地记录时，退出 Zotero 后可先备份该目录，再移至废纸篓；这不会删除文库中的 PDF 或已另存的 Zotero 笔记。本地阅读记录尚无应用内回收站或跨设备同步。
-
-## 6. 用户可以做什么
-
-- 不点击网页精读或侧栏 AI 操作，插件就不会发送文献内容；
-- 在研雀中删除单篇论文、PDF、笔记、卡片和对话等内容；
-- 通过应用内反馈请求删除当前身份的全部服务器数据；
-- 通过 Zotero 插件管理器停用或卸载 Connector。
-
-## 7. 安全与当前限制
-
-当前源码拒绝远程 HTTP 服务地址，仅允许 HTTPS 或明确的 localhost / 127.0.0.1 / [::1] 本机 HTTP 调试；携带凭据的请求拒绝自动重定向。导入期间更改服务地址、设备身份或账号会话会停止后续上传及浏览器跳转；已完成的请求不会自动撤回。0.7.0 提供当前研雀会话的退出撤销，Zotero 密码与认证由 Zotero 管理。未关联账号的旧专属链接仍属于匿名凭据；本次尚未提供全设备会话管理、自动跨设备同步或账号删除界面。云端直传仍待 Zotero 原生验收，预览附件删除与过期清理尚未开放。
-
-旧地址不安全导致退出无法联网时，可明确确认仅移除本机登录记录，以便修复连接；不会发送 token，也不会删除阅读文件。该操作不会撤销远端会话，须使用安全地址或服务管理端继续处理；取消确认则保留现有本机登录。
-
-安全漏洞请按照 [SECURITY.md](SECURITY.md) 私下报告，不要在公开 Issue 中披露可利用细节或身份信息。
-
-## 8. 政策更新
-
-本政策发生实质变化时，会在仓库提交记录和 Release 说明中标注。继续使用更新后的插件前，用户应查看最新版政策。
-
----
-
-## English Summary
-
-LitFinch for Zotero uploads only the Zotero item explicitly selected by the user, including its metadata, best available PDF attachment and an anonymous device identifier. It does not scan or upload the full Zotero library. Paper content and prompts may be sent to third-party AI providers configured by the LitFinch service. Server data is retained until item deletion or a verified deletion request; no uniform automatic retention period is promised during the public beta. Do not use the service for patient-identifiable, confidential or unauthorized content.
-
-</details>
+**English summary:** Reading records stay in the user's Zotero profile. Personal API requests go directly to the selected provider; Codex uses its official app-server and the user's ChatGPT subscription. Reading backups contain reading records only. Legacy website records remain accessible through the original account. Self-hosted connections retain their explicit upload flow.
