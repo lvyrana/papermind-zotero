@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "研雀 · LitFinch",
-  "version": "0.8.0",
+  "version": "0.8.5",
   "description": "研雀本地阅读台：个人 API 或 Codex 连接 AI，阅读记录自行保存、导出与恢复",
   "author": "雀雀",
   "homepage_url": "https://papermindapp.com",
@@ -14,7 +14,7 @@
       "id": "papermind-connector@papermind.local",
       "update_url": "https://papermindapp.com/api/zotero-plugin/update.json",
       "strict_min_version": "6.999",
-      "strict_max_version": "9.*"
+      "strict_max_version": "10.0.*"
     }
   }
 }

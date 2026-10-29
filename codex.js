@@ -41,7 +41,7 @@ var PaperMindCodex = {
       const value = Services.env.get(key); if (value) environment[key] = value
     }
     const process = await Subprocess.call({ command, arguments: ['app-server'], environment, workdir: work, stderr: 'pipe' })
-    this.process = process; this.workdir = work; this.win = win
+    this.process = process; this.workdir = work; this.win = win; this.launchPath = config.codexPath || ''
     void this.read(process)
     // Drain diagnostics without persisting possible provider responses or tokens.
     void (async () => { try { while (await process.stderr.readString()) {} } catch { /* process exited */ } })()
@@ -100,12 +100,18 @@ var PaperMindCodex = {
     }
     for (const listener of this.listeners) listener(message)
   },
-  async check(win, config) {
+  async models(win, config) {
+    if (this.process && (config.codexPath || '') !== this.launchPath) throw new Error('Codex 路径已更改，请先保存连接，再获取模型。')
     await this.start(win, config)
+    if ((config.codexPath || '') !== this.launchPath) throw new Error('Codex 路径已更改，请先保存连接，再获取模型。')
     const result = await this.rpc('account/read', { refreshToken: false })
     if (result.account?.type !== 'chatgpt') throw new Error('尚未使用 ChatGPT 登录，请点击「使用 ChatGPT 登录」。')
     const models = await this.rpc('model/list', { limit: 100 })
-    if (config.model && !models.data?.some(x => x.id === config.model || x.model === config.model)) throw new Error('当前订阅模型列表中没有该模型，请清空模型名称使用默认值。')
+    return models.data || []
+  },
+  async check(win, config) {
+    const models = await this.models(win, config)
+    if (config.model && !models.some(x => x.id === config.model || x.model === config.model)) throw new Error('当前订阅模型列表中没有该模型，请清空模型名称使用默认值。')
     return '已连接本人 ChatGPT 订阅；阅读将使用该订阅的 Codex 额度。'
   },
   async login(win, config) {

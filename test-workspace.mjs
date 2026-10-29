@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import vm from 'node:vm'
 import { webcrypto } from 'node:crypto'
+import { browserOptions } from './scripts/browser-fixture.mjs'
 
 function fixture(files = new Map()) {
   const prefs = new Map([['extensions.papermind.uid', '123e4567-e89b-42d3-a456-426614174000'], ['extensions.papermind.configVersion', 3]])
@@ -112,7 +113,8 @@ test('reopening a paper with a saved card does not show the start hint again', a
 
 test('workspace browser fixture retains Chromium sandbox and uses unique portable screenshots', () => {
   const script = fs.readFileSync(new URL('scripts/check-workspace-browser.mjs', import.meta.url), 'utf8')
-  assert.match(script, /chromiumSandbox: true/)
+  assert.equal(browserOptions.chromiumSandbox, true)
+  assert.match(script, /chromium\.launch\(browserOptions\)/)
   assert.match(script, /mkdtemp\(join\(tmpdir\(\)/)
   assert.doesNotMatch(script, /\/private\/tmp|--no-sandbox/)
 })
@@ -236,6 +238,46 @@ test('chat sends page text plus bounded whole-document background, never uploads
   assert.equal(f.session.messages.length, 2)
   assert.equal(f.session.messages[1].source.page, 2)
   assert.equal(f.session.draft, '')
+})
+
+test('abstract reading sends only entry metadata and works without extracting PDF pages', async () => {
+  const f = fixture(); await f.workspace.load(f.session)
+  f.context.collect = async () => { throw new Error('PDF extraction must not run for an abstract') }
+  f.session.draft = 'Unsent draft about another detail'
+  f.session.messages = [{ role: 'user', content: 'Private previous discussion' }]
+  f.session.source = { text: 'Selected body paragraph', page: 3, attachmentKey: f.attachment.key }
+  await f.workspace.run(f.session, 'abstract', f.win)
+  assert.equal(f.session.error, '')
+  assert.equal(f.reads(), 0)
+  assert.equal(f.requests.length, 1)
+  assert.deepEqual(f.requests[0].payload, { paper_title: 'Test PDF', paper_abstract: 'Synthetic abstract', mode: 'abstract' })
+  assert.equal(f.workspace.state(f.session).guide.coverage, '依据条目摘要')
+  assert.equal(f.workspace.state(f.session).guide.source, null)
+  assert.equal(f.session.draft, 'Unsent draft about another detail')
+  assert.equal(f.session.messages.length, 1)
+})
+
+test('missing abstract fails before PDF extraction or a provider request', async () => {
+  const f = fixture()
+  f.paper.getField = key => key === 'title' ? 'No abstract' : '  '
+  f.context.collect = async () => { throw new Error('Unexpected extraction') }
+  await f.workspace.run(f.session, 'abstract', f.win)
+  assert.match(f.session.error, /条目没有摘要/)
+  assert.equal(f.requests.length, 0)
+  assert.equal(f.reads(), 0)
+})
+
+test('reading routes and current-page reading retain PDF context', async () => {
+  for (const action of ['map', 'page']) {
+    const f = fixture()
+    await f.workspace.run(f.session, action, f.win)
+    assert.equal(f.session.error, '')
+    assert.ok(f.reads() > 0)
+    assert.equal(f.requests[0].payload.current_page, 2)
+    assert.match(f.requests[0].payload.current_page_text, /Current methods/)
+    assert.match(f.requests[0].payload.paper_pages, /Results no association/)
+    assert.notEqual(f.workspace.state(f.session).guide.coverage, '依据条目摘要')
+  }
 })
 
 test('reading modes and quiz run in the plugin and quiz answers retain the question', async () => {
