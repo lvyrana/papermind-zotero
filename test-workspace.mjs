@@ -111,6 +111,159 @@ test('reopening a paper with a saved card does not show the start hint again', a
   assert.equal(fresh.writes.length, 0)
 })
 
+test('abstract cards never borrow the current selection and remain source-free after reload', async () => {
+  const f = fixture()
+  f.session.source = { text: 'Unrelated selected methods', page: 2, attachmentKey: f.attachment.key, libraryID: 1 }
+  await f.workspace.run(f.session, 'abstract', f.win)
+  const result = f.workspace.state(f.session).guide
+  assert.equal(result.source, null)
+  await f.workspace.capture(f.session, result)
+  assert.equal(f.workspace.state(f.session).cards[0].source, null)
+  f.session.source = { ...f.session.source, text: 'Another selected result', page: 3 }
+  await f.workspace.capture(f.session, result)
+  const cards = f.workspace.state(f.session).cards
+  assert.equal(cards.length, 1)
+  assert.equal(cards[0].source, null)
+  assert.equal(cards[0].content, result.content)
+  await f.workspace.toBoard(f.session, cards[0], '背景')
+  const fresh = fixture(f.files)
+  await fresh.workspace.load(fresh.session)
+  const restored = fresh.workspace.state(fresh.session)
+  assert.equal(restored.cards[0].source, null)
+  assert.equal(restored.board[0].source, null)
+})
+
+test('capturing results keeps their own source, rejects empty content and normalizes absent sources', async () => {
+  const f = fixture()
+  const original = { text: 'Original evidence', page: 1, attachmentKey: f.attachment.key, libraryID: 1 }
+  f.session.source = { ...original, text: 'New selection', page: 3 }
+  await f.workspace.capture(f.session, { content: 'Reading result', source: original })
+  assert.equal(f.workspace.state(f.session).cards[0].source.page, 1)
+  await f.workspace.capture(f.session, { content: '', source: null })
+  assert.equal(f.workspace.state(f.session).cards.length, 1)
+  assert.match(f.session.error, /先划选原文/)
+  const note = { content: 'Source-free personal note', origin: '个人笔记' }
+  await f.workspace.capture(f.session, note)
+  await f.workspace.capture(f.session, note)
+  const cards = f.workspace.state(f.session).cards
+  assert.equal(cards.length, 2)
+  assert.equal(cards[1].source, null)
+  await f.workspace.capture(f.session)
+  assert.equal(cards.length, 3)
+  assert.equal(cards[2].content, 'New selection')
+  assert.equal(cards[2].source.page, 3)
+  assert.equal(cards[2].origin, '原文')
+})
+
+test('inline editing saves multi-paragraph text, rejects empty drafts and creates new cards', async () => {
+  const f = fixture(); await f.workspace.load(f.session)
+  const w = f.workspace.state(f.session)
+  await f.workspace.capture(f.session, { content: 'Original card', origin: 'AI 解读' })
+  const card = w.cards[0]; card.noteID = 7
+  w.editing = card; w.editDraft = '   '
+  await f.workspace.saveEdit(f.session)
+  assert.equal(card.content, 'Original card'); assert.equal(w.editing, card)
+  assert.match(f.session.error, /内容为空/)
+  w.editDraft = 'First paragraph\n\nSecond paragraph  '
+  await f.workspace.saveEdit(f.session)
+  assert.deepEqual([card.content, card.origin, card.noteID, w.editing, f.session.error], ['First paragraph\n\nSecond paragraph', '个人编辑', null, null, ''])
+  w.editing = 'new'; w.editDraft = 'Personal judgement'
+  await f.workspace.saveEdit(f.session)
+  assert.deepEqual([w.cards.length, w.cards[1].content, w.cards[1].origin, w.editing], [2, 'Personal judgement', '个人笔记', null])
+})
+
+test('reading tasks state their own length so answers stay short', async () => {
+  for (const [action, pattern] of [['page', /约250—350字/], ['guide', /约200—300字/], ['map', /最多5步/]]) {
+    const f = fixture()
+    if (action === 'guide') f.session.source = { text: 'Selected body paragraph', page: 2, attachmentKey: f.attachment.key, libraryID: 1 }
+    await f.workspace.run(f.session, action, f.win)
+    assert.equal(f.session.error, '')
+    assert.match(f.requests.at(-1).payload.message, pattern)
+    assert.match(f.requests.at(-1).payload.message, /不写标题/)
+  }
+})
+
+test('excerpt cards carry a translation that survives reload and backup; edits clear it and failures offer a retry', async () => {
+  const f = fixture(); await f.workspace.load(f.session)
+  const w = f.workspace.state(f.session)
+  f.ctx.PaperMind.ai.config = () => ({ mode: 'api' })
+  let answer = { ok: true, translated: '观察到的效应不确定。' }
+  f.win.fetch = async (url, options) => { f.requests.push({ url, payload: JSON.parse(options.body) }); return { ok: true, json: async () => answer } }
+  const settle = async () => { while (w.translating.size) await new Promise(resolve => setTimeout(resolve, 0)) }
+  f.session.source = { text: 'The observed effect was uncertain.', page: 2, attachmentKey: f.attachment.key, libraryID: 1 }
+  await f.workspace.capture(f.session); await settle()
+  assert.equal(f.requests.at(-1).url, 'https://synthetic-ai.test/api/translate')
+  assert.equal(w.cards[0].translation, '观察到的效应不确定。')
+  const fresh = fixture(f.files); await fresh.workspace.load(fresh.session)
+  assert.equal(fresh.workspace.state(fresh.session).cards[0].translation, '观察到的效应不确定。')
+  const packet = JSON.parse(JSON.stringify(f.workspace.backup(f.session)))
+  assert.equal(f.workspace.validateBackup(packet, f.session).cards[0].translation, '观察到的效应不确定。')
+  await f.workspace.toBoard(f.session, w.cards[0], '发现')
+  assert.equal(w.board[0].translation, '观察到的效应不确定。')
+  w.editing = w.cards[0]; w.editDraft = 'The effect was uncertain.'
+  await f.workspace.saveEdit(f.session)
+  assert.equal(w.cards[0].translation, undefined)
+  answer = { ok: false, error: '服务不可用' }
+  await f.workspace.translateCard(f.session, w.cards[0], true)
+  assert.match(f.session.error, /服务不可用.*补译文/)
+  const count = f.requests.length
+  await f.workspace.capture(f.session, { content: '中文个人笔记，不需要翻译。', origin: '个人笔记' }); await settle()
+  f.prefs.set('extensions.papermind.cardTranslate', false)
+  f.session.source = { ...f.session.source, text: 'Another English excerpt.' }
+  await f.workspace.capture(f.session); await settle()
+  assert.equal(f.requests.length, count)
+})
+
+test('restored abstract cards and board entries stay deduplicated with omitted sources', async () => {
+  const f = fixture()
+  await f.workspace.run(f.session, 'abstract', f.win)
+  const result = f.workspace.state(f.session).guide
+  await f.workspace.capture(f.session, result)
+  await f.workspace.toBoard(f.session, result, '背景')
+  const packet = JSON.parse(JSON.stringify(f.workspace.backup(f.session)))
+  f.io.copy = async (from, to) => f.files.set(to, f.files.get(from))
+  await f.workspace.restore(f.session, packet)
+  for (const current of [f, fixture(f.files)]) {
+    await current.workspace.load(current.session)
+    const w = current.workspace.state(current.session)
+    await current.workspace.capture(current.session, w.guide)
+    await current.workspace.toBoard(current.session, result, '背景')
+    await current.workspace.toBoard(current.session, w.guide, '背景')
+    await current.workspace.toBoard(current.session, w.cards[0], '背景')
+    assert.deepEqual([w.cards.length, w.board.length], [1, 1])
+  }
+})
+
+test('selected cards survive restore without duplicates while distinct sources stay separate', async () => {
+  const f = fixture()
+  const source = f.sidebar.captureSource(f.attachment, {
+    text: 'Synthetic selected passage', pageLabel: 'ii', position: { pageIndex: 1 },
+  })
+  f.session.source = source
+  await f.workspace.capture(f.session)
+  const result = { content: source.text, source }
+  await f.workspace.toBoard(f.session, result, '背景')
+  const packet = JSON.parse(JSON.stringify(f.workspace.backup(f.session)))
+  f.io.copy = async (from, to) => f.files.set(to, f.files.get(from))
+  await f.workspace.restore(f.session, packet)
+  const fresh = fixture(f.files)
+  await fresh.workspace.load(fresh.session)
+  fresh.session.source = { libraryID: source.libraryID, attachmentKey: source.attachmentKey,
+    page: source.page, text: source.text, pageLabel: '2' }
+  await fresh.workspace.capture(fresh.session)
+  await fresh.workspace.toBoard(fresh.session, result, '背景')
+  const w = fresh.workspace.state(fresh.session)
+  assert.deepEqual([w.cards.length, w.board.length], [1, 1])
+  for (const change of [{ page: 3 }, { attachmentKey: 'OTHERPDF' }, { libraryID: 2 }, { text: 'Different passage' }]) {
+    const other = { ...result, source: { ...source, ...change } }
+    await fresh.workspace.capture(fresh.session, other)
+    await fresh.workspace.toBoard(fresh.session, other, '背景')
+  }
+  assert.deepEqual([w.cards.length, w.board.length], [5, 5])
+  await fresh.workspace.toBoard(fresh.session, result, '方法')
+  assert.equal(w.board.length, 6)
+})
+
 test('workspace browser fixture retains Chromium sandbox and uses unique portable screenshots', () => {
   const script = fs.readFileSync(new URL('scripts/check-workspace-browser.mjs', import.meta.url), 'utf8')
   assert.equal(browserOptions.chromiumSandbox, true)

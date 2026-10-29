@@ -447,6 +447,12 @@ async function startup({ rootURI }) {
     scope.PaperMindWorkspace.install(PaperMind.sidebar)
     PaperMind.sidebar.workspace = scope.PaperMindWorkspace
     PaperMind.sidebar.init(rootURI)
+    // List the plugin in Zotero's Settings window next to other plugins.
+    Zotero.LitFinchPrefs = { render: root => scope.PaperMindWorkspace.renderPreferences(root) }
+    try {
+      PaperMind.prefPaneID = await Zotero.PreferencePanes?.register({ pluginID: 'papermind-connector@papermind.local',
+        src: rootURI + 'prefs.xhtml', scripts: [rootURI + 'prefs.js'], label: '研雀', image: rootURI + 'icon.svg' })
+    } catch (error) { PaperMind.log('settings pane registration failed: ' + error) }
   } catch (error) {
     // A sidebar registration failure must not remove the existing web entry.
     PaperMind.log('sidebar initialization failed: ' + error)
@@ -469,6 +475,8 @@ function shutdown() {
   PaperMind.account?.dispose()
   PaperMind.sidebar?.destroy()
   if (typeof Zotero !== 'undefined') {
+    if (PaperMind.prefPaneID) Zotero.PreferencePanes?.unregister?.(PaperMind.prefPaneID)
+    delete Zotero.LitFinchPrefs
     for (const win of Zotero.getMainWindows()) {
       PaperMind.removeFromWindow(win)
     }

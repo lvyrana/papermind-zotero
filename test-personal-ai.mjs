@@ -70,6 +70,7 @@ test('both abstract entry points isolate title and abstract at the provider boun
     assert.match(messages.at(-1).content, /200—250字/)
     assert.match(messages.at(-1).content, /最多3个短段/)
     assert.match(messages[0].content, /不得操作文件、调用工具/)
+    assert.match(messages[0].content, /回答追问时直接回答问题，一般不超过200字/)
   }
 })
 
@@ -94,6 +95,32 @@ test('legacy saved configuration and blank translation model retain the reading 
   await f.ai.save({ ...f.ai.config(), translationModel: '  ' })
   await f.ai.request(f.win, '/api/translate', { text: 'Original' })
   assert.equal(JSON.parse(f.requests[1].body).model, 'legacy-model')
+})
+
+test('streaming reads split server-sent chunks and falls back when a service rejects streaming', async () => {
+  const f = fixture(), encoder = new TextEncoder()
+  await f.ai.save({ mode: 'api', base: 'http://localhost/v1', model: 'reader' })
+  f.win.TextDecoder = TextDecoder
+  const chunks = ['data: {"choices":[{"delta":{"content":"第一"}}]}\n\nda', 'ta: {"choices":[{"delta":{"content":"段。"}}]}\n\n: keep-alive\n', 'data: [DONE]\n\n']
+  f.win.fetch = async (url, options) => {
+    f.requests.push({ url, ...options }); let index = 0
+    return { ok: true, headers: { get: () => 'text/event-stream; charset=utf-8' },
+      body: { getReader: () => ({ read: async () => index < chunks.length ? { value: encoder.encode(chunks[index++]), done: false } : { done: true } }) } }
+  }
+  const seen = []
+  assert.equal((await f.ai.request(f.win, '/api/chat', { message: 'Explain' }, undefined, text => seen.push(text))).reply, '第一段。')
+  assert.deepEqual(seen, ['第一', '第一段。'])
+  assert.equal(JSON.parse(f.requests[0].body).stream, true)
+  f.requests.length = 0
+  f.win.fetch = async (url, options) => {
+    f.requests.push({ url, ...options })
+    return JSON.parse(options.body).stream ? { ok: false, status: 400 } : { ok: true, json: async () => ({ choices: [{ message: { content: 'Whole answer' } }] }) }
+  }
+  assert.equal((await f.ai.request(f.win, '/api/chat', { message: 'Explain' }, undefined, () => {})).reply, 'Whole answer')
+  assert.deepEqual(f.requests.map(request => JSON.parse(request.body).stream), [true, false])
+  f.requests.length = 0
+  assert.equal((await f.ai.request(f.win, '/api/translate', { text: 'Original' })).translated, 'Whole answer')
+  assert.deepEqual(f.requests.map(request => JSON.parse(request.body).stream), [false])
 })
 
 test('Codex receives independent models and keeps account defaults when both are blank', async () => {

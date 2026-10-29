@@ -269,8 +269,13 @@ var PaperMindSidebar = {
     const previous = this.translations.get(reader)
     if (previous && previous.sourceKey !== JSON.stringify(source)) previous.close()
     const bar = doc.createElement('div')
-    bar.style.cssText = 'display:flex;gap:6px;padding:6px;flex-wrap:wrap'
-    const actions = [['精读这段', 'guide'], ['翻译', 'translate'], ['带入追问', null]]
+    bar.className = 'pm-selection-actions'
+    bar.style.cssText = 'display:flex;gap:2px;padding:4px;flex-wrap:wrap;border-top:1px solid color-mix(in srgb,currentColor 14%,transparent)'
+    // Match the reader popup's flat buttons instead of default form controls.
+    const style = doc.createElement('style')
+    style.textContent = '.pm-selection-actions button{font:13px system-ui,sans-serif;color:inherit;background:transparent;border:0;border-radius:5px;padding:4px 8px;cursor:pointer}.pm-selection-actions button:hover{background:color-mix(in srgb,currentColor 10%,transparent)}'
+    bar.appendChild(style)
+    const actions = [['精读这段', 'guide'], ...(this.showPopupTranslate() ? [['翻译', 'translate']] : []), ['带入追问', null]]
     if (this.SHOW_WORKSPACE) actions.push(['存为卡片', 'card'])
     for (const [label, action] of actions) {
       const button = doc.createElement('button')
@@ -296,6 +301,10 @@ var PaperMindSidebar = {
     }
     append(bar)
   },
+
+  // Readers who already use another translation add-on can hide this button.
+  popupTranslatePref: 'extensions.papermind.popupTranslate',
+  showPopupTranslate() { return Zotero.Prefs.get(this.popupTranslatePref, true) !== false },
 
   translationPlacement(rect, viewport, height, width = 360) {
     const margin = 12, gap = 10
@@ -473,6 +482,8 @@ var PaperMindSidebar = {
       .pm-reading .pm-user {margin-left:28px;background:#78968114;padding:10px 12px;border-radius:12px;}
       .pm-reading .pm-answer {white-space:pre-wrap;overflow-wrap:anywhere;}
       .pm-reading .pm-answer strong {font-weight:650;}
+      .pm-reading .pm-answer p {margin:0 0 8px;} .pm-reading .pm-answer p:last-child {margin-bottom:0;}
+      .pm-reading .pm-answer ul, .pm-reading .pm-answer ol {margin:0 0 8px;padding-left:20px;white-space:normal;}
       .pm-reading .pm-message-label {font-size:11px;opacity:.55;margin-bottom:6px;}
       .pm-reading .pm-composer {flex:none;padding:10px 14px 14px;border-top:1px solid #89988833;background:inherit;}
       .pm-reading .pm-inputbox {border:1px solid #89988866;border-radius:12px;padding:10px;}
@@ -595,13 +606,36 @@ var PaperMindSidebar = {
 
   renderAnswer(node, text) {
     // A deliberately small Markdown subset; model output never becomes HTML.
-    for (const part of String(text).split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/g)) {
-      if ((part.startsWith('**') && part.endsWith('**')) || (part.startsWith('`') && part.endsWith('`'))) {
-        const bold = part.startsWith('**')
-        const child = node.ownerDocument.createElementNS('http://www.w3.org/1999/xhtml', bold ? 'strong' : 'code')
-        child.textContent = part.slice(bold ? 2 : 1, bold ? -2 : -1)
-        node.appendChild(child)
-      } else node.appendChild(node.ownerDocument.createTextNode(part.replace(/^#{1,4} /gm, '')))
+    const doc = node.ownerDocument
+    const make = (tag, parent) => parent.appendChild(doc.createElementNS('http://www.w3.org/1999/xhtml', tag))
+    const inline = (parent, value) => {
+      for (const part of value.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/g)) {
+        if ((part.startsWith('**') && part.endsWith('**') && part.length > 4) || (part.startsWith('`') && part.endsWith('`') && part.length > 2)) {
+          const bold = part.startsWith('**')
+          make(bold ? 'strong' : 'code', parent).textContent = part.slice(bold ? 2 : 1, bold ? -2 : -1)
+        } else if (part) parent.appendChild(doc.createTextNode(part))
+      }
+    }
+    // Blank lines end a paragraph; consecutive list lines share one list.
+    let list = null, paragraph = null
+    for (const line of String(text).split('\n')) {
+      const item = line.match(/^\s*(?:([-*•])|(\d{1,2})[.)])\s+(.*)$/)
+      const heading = line.match(/^#{1,4}\s+(.*)$/)
+      if (!line.trim()) { list = paragraph = null; continue }
+      if (item) {
+        const tag = item[1] ? 'ul' : 'ol'
+        if (list?.localName !== tag) {
+          list = make(tag, node); paragraph = null
+          if (tag === 'ol' && item[2] !== '1') list.setAttribute('start', item[2])
+        }
+        inline(make('li', list), item[3])
+        continue
+      }
+      list = null
+      if (heading) { paragraph = null; inline(make('strong', make('p', node)), heading[1]); continue }
+      if (paragraph) paragraph.appendChild(doc.createTextNode('\n'))
+      else paragraph = make('p', node)
+      inline(paragraph, line)
     }
   },
 
@@ -688,6 +722,7 @@ var PaperMindSidebar = {
     return `<h2>研雀 · ${esc(message.question)}</h2><p>${esc(session.paper.getField('title'))}</p>`
       + (source ? `<p><a href="${esc(this.sourceURL(source))}">返回原文${source.page ? ` · PDF 第 ${source.page} 页` : ''}</a></p><blockquote>${paragraphs(source.text)}</blockquote>` : '<p>本次未附选段；上下文为条目题名、摘要及此前对话（如有）。</p>')
       + `<p><strong>AI 解读</strong></p><p>${paragraphs(message.content)}</p>`
+      + (message.translation ? `<p><strong>译文</strong></p><p>${paragraphs(message.translation)}</p>` : '')
   },
 
   async saveNote(session, message, editable) {

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 
 export const members = Object.freeze([
   'manifest.json', 'bootstrap.js', 'sidebar.js', 'reader-context.js',
-  'workspace.js', 'account.js', 'ai.js', 'codex.js', 'icon.svg', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
+  'workspace.js', 'account.js', 'ai.js', 'codex.js', 'prefs.js', 'prefs.xhtml', 'icon.svg', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
   'locale/zh-CN/papermind.ftl', 'locale/en-US/papermind.ftl',
 ])
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
