@@ -38,7 +38,8 @@ try {
       Libraries: { get: () => ({ libraryType: 'user', editable: true }) },
       Reader: { getByTabID: () => reader, registerEventListener() {}, _unregisterEventListenerByPluginID() {}, open: async (id, location) => { window.__lastOpen = { id, location } } },
       Item: class { setNote(html) { this.html = html } async saveTx() { notes.push(this.html); return notes.length } } }
-    window.__aiRespond = messages => messages.at(-1).content.includes('带读这篇论文的摘要')
+    window.__aiRespond = messages => messages[0].content.startsWith('将以下原文译成中文') ? '另一段本地文字。'
+      : messages.at(-1).content.includes('带读这篇论文的摘要')
       ? '这项研究评估干预效果，摘要报告的估计范围较宽。阅读时先抓住主要结果和估计精度。'
       : messages.at(-1).content.includes('一次只问一题')
       ? '如何根据区间估计判断不确定性？请回看第 2 页。'
@@ -116,19 +117,38 @@ try {
   await page.getByText('应结合区间估计与研究设计判断，原文第 2 页给出了估计范围。', { exact: true }).waitFor()
   await page.getByRole('button', { name: '存为卡片', exact: true }).click()
   await page.getByRole('heading', { name: '阅读卡片 · 1', exact: true }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '✓ 已存卡片', exact: true }).isDisabled(), true)
   await page.locator('summary').filter({ hasText: '送到汇报' }).first().click()
+  // A refresh rebuilds the panel; the menu the reader opened must stay open.
+  await page.waitForFunction(() => PaperMindWorkspace.state(PaperMindSidebar.sessionFor(__paper)).openMenu)
+  await page.evaluate(() => PaperMindSidebar.refresh(PaperMindSidebar.sessionFor(__paper)))
+  assert.equal(await page.locator('details.pmw-menu[open]').count(), 1)
   await page.getByRole('button', { name: '发现', exact: true }).first().click()
   await page.getByRole('heading', { name: '单篇汇报' }).waitFor()
   await page.getByRole('button', { name: '保存汇报到 Zotero 笔记', exact: true }).click()
   await page.waitForFunction(() => __notes.length === 1)
   await page.getByRole('button', { name: '保存汇报到 Zotero 笔记', exact: true }).click()
   assert.equal(await page.evaluate(() => __notes.length), 1)
-  await page.getByRole('button', { name: '考考自己', exact: true }).click()
+  assert.equal(await page.getByRole('button', { name: '汇报 · 1', exact: true }).getAttribute('aria-current'), 'page')
+  await page.getByRole('button', { name: '自测', exact: true }).click()
   await page.getByRole('button', { name: '出一道题', exact: true }).click()
   await page.getByRole('textbox', { name: '自测回答', exact: true }).fill('区间包含无效值，需要保留不确定性。')
   await page.getByRole('button', { name: '核对回答', exact: true }).click()
   await page.waitForFunction(() => PaperMindWorkspace.state(PaperMindSidebar.sessionFor(__paper)).quiz.length === 4)
-  await page.getByRole('button', { name: '← 返回阅读台', exact: true }).click()
+  await page.getByRole('button', { name: '阅读', exact: true }).click()
+  // Cards are edited in place with a multi-line box, not a one-line prompt.
+  await page.locator('article.pmw-card').filter({ hasText: 'AI 解读' }).getByRole('button', { name: '编辑', exact: true }).click()
+  const editBox = page.getByRole('textbox', { name: '编辑内容', exact: true })
+  await page.waitForFunction(() => document.activeElement?.dataset.input === 'edit')
+  await editBox.fill('第一段证据。\n\n第二段：个人补充。')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByText('个人编辑', { exact: true }).waitFor()
+  assert.equal(await page.evaluate(() => PaperMindWorkspace.state(PaperMindSidebar.sessionFor(__paper)).cards[0].content), '第一段证据。\n\n第二段：个人补充。')
+  await page.getByRole('button', { name: '写卡片', exact: true }).click()
+  await editBox.fill('取消的草稿')
+  await editBox.press('Escape')
+  assert.equal(await editBox.count(), 0)
+  await page.getByRole('heading', { name: '阅读卡片 · 1', exact: true }).waitFor()
   await page.evaluate(() => { __pdfApp.pdfViewer.currentPageNumber = 3 })
   await page.getByText('本地 PDF · 第 3 / 3 页', { exact: true }).waitFor()
   await page.evaluate(() => PaperMindSidebar.selectionPopup({ reader: __reader, doc: document, params: { annotation: { text: 'Selected local text.', position: { pageIndex: 2 } } }, append: node => document.getElementById('selection').appendChild(node) }))
@@ -146,14 +166,16 @@ try {
   assert.match(payload.paper_pages, /第 1 页/)
   await page.evaluate(() => {
     const s = PaperMindSidebar.sessionFor(__paper)
-    s.messages.push({ role: 'assistant', content: '长回答\n'.repeat(180) + '<img src=x onerror=alert(1)>' })
+    s.messages.push({ role: 'assistant', content: '**要点**\n- 第一条\n- 第二条\n\n1. 步骤一\n\n' + '长回答\n'.repeat(180) + '<img src=x onerror=alert(1)>' })
     PaperMindSidebar.refresh(s)
   })
   const layout = await page.evaluate(() => ({ bottom: document.querySelector('[data-input="chat"]').getBoundingClientRect().bottom,
     height: innerHeight, injected: document.querySelectorAll('.pmw img').length,
+    lists: [document.querySelectorAll('.pmw-text ul > li').length, document.querySelectorAll('.pmw-text ol > li').length],
     scroll: document.querySelector('.pmw-scroll').scrollHeight > document.querySelector('.pmw-scroll').clientHeight }))
   assert.ok(layout.bottom < layout.height); assert.equal(layout.injected, 0); assert.equal(layout.scroll, true)
-  await page.getByRole('button', { name: '← 返回阅读台', exact: true }).click()
+  assert.deepEqual(layout.lists, [2, 1])
+  await page.getByRole('button', { name: '阅读', exact: true }).click()
   await page.screenshot({ path: join(artifacts, 'reading-with-card.png') })
   // Capture the actual component with a readable synthetic title for the README.
   // Keep the preceding long-title stress test and its evidence unchanged.
@@ -170,11 +192,100 @@ try {
   })
   await page.getByRole('heading', { name: '阅读卡片 · 1', exact: true }).waitFor()
   assert.equal(await hint.count(), 0)
+  // Saving an abstract must not borrow an unrelated selection, including after
+  // reopening the paper or selecting another passage before saving it again.
+  await page.evaluate(() => {
+    const s = PaperMindSidebar.sessionFor(__paper)
+    s.source = { text: 'Unrelated passage', page: __pdfApp.pdfViewer.currentPageNumber,
+      attachmentKey: __attachment.key, libraryID: 1 }
+    PaperMindSidebar.refresh(s)
+  })
+  await page.getByRole('button', { name: '读摘要', exact: true }).click()
+  await page.getByRole('heading', { name: '摘要带读', exact: true }).waitFor()
+  const abstractCard = page.locator('article').filter({ has: page.getByRole('heading', { name: '摘要带读', exact: true }) })
+  await abstractCard.getByRole('button', { name: '存为卡片', exact: true }).click()
+  await page.getByRole('heading', { name: '阅读卡片 · 2', exact: true }).waitFor()
+  // The saved result shows a disabled state; still exercise a repeated capture.
+  assert.equal(await abstractCard.getByRole('button', { name: '✓ 已存卡片', exact: true }).isDisabled(), true)
+  await page.evaluate(async () => {
+    const s = PaperMindSidebar.sessionFor(__paper)
+    s.source.text = 'Another unrelated passage'
+    await PaperMindWorkspace.capture(s, PaperMindWorkspace.state(s).guide)
+  })
+  assert.deepEqual(await page.evaluate(() => {
+    const cards = PaperMindWorkspace.state(PaperMindSidebar.sessionFor(__paper)).cards
+    return [cards.length, cards.at(-1).source]
+  }), [2, null])
+  await page.evaluate(async () => {
+    const old = PaperMindSidebar.sessionFor(__paper)
+    await PaperMindWorkspace.state(old).writeQueue
+    PaperMindSidebar.sessions.delete(old.key)
+    PaperMindSidebar.syncWindow(window)
+  })
+  await page.getByRole('heading', { name: '阅读卡片 · 2', exact: true }).waitFor()
+  assert.equal(await page.locator('article.pmw-card').last().getByRole('button', { name: /^原文/ }).count(), 0)
+  await page.screenshot({ path: join(artifacts, 'abstract-card-source.png') })
+  // Answers appear while they stream; only the finished answer is kept.
+  await page.evaluate(() => {
+    window.__plainFetch = window.fetch
+    window.fetch = async (url, options) => {
+      const body = JSON.parse(options.body)
+      if (!body.stream) return __plainFetch(url, options)
+      __requests.push({ url, body, credentials: options.credentials, redirect: options.redirect })
+      const encoder = new TextEncoder(); let step = 0
+      const gate = new Promise(resolve => { window.__releaseStream = resolve })
+      return { ok: true, headers: { get: () => 'text/event-stream' }, body: { getReader: () => ({ read: async () => {
+        step++
+        if (step === 1) return { value: encoder.encode('data: {"choices":[{"delta":{"content":"逐步出现的"}}]}\n\n'), done: false }
+        if (step === 2) { await gate; return { value: encoder.encode('data: {"choices":[{"delta":{"content":"回答。"}}]}\n\ndata: [DONE]\n\n'), done: false } }
+        return { done: true }
+      } }) } }
+    }
+  })
+  await page.getByRole('button', { name: '读当前页', exact: true }).click()
+  await page.locator('[aria-busy="true"]').getByText('逐步出现的', { exact: true }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '停止', exact: true }).isVisible(), true)
+  assert.equal(await page.evaluate(() => PaperMindWorkspace.state(PaperMindSidebar.sessionFor(__paper)).guide.content.includes('逐步出现的')), false)
+  await page.screenshot({ path: join(artifacts, 'streaming.png') })
+  await page.evaluate(() => __releaseStream())
+  await page.getByText('逐步出现的回答。', { exact: true }).waitFor()
+  assert.equal(await page.locator('[aria-busy="true"]').count(), 0)
+  assert.equal(await page.evaluate(() => PaperMindWorkspace.state(PaperMindSidebar.sessionFor(__paper)).guide.content), '逐步出现的回答。')
+  await page.evaluate(() => { window.fetch = __plainFetch })
+  // Readers with another translation add-on can hide the popup's translate button.
+  await page.evaluate(() => {
+    Zotero.Prefs.set = (key, value) => { const prior = Zotero.Prefs.get; Zotero.Prefs.get = (k, global) => k === key ? value : prior(k, global) }
+  })
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  const translateToggle = page.getByRole('checkbox', { name: /显示「翻译」按钮/ })
+  assert.equal(await translateToggle.isChecked(), true)
+  await translateToggle.uncheck()
+  assert.equal(await page.evaluate(() => PaperMindSidebar.showPopupTranslate()), false)
+  await page.evaluate(() => {
+    const box = document.createElement('div'); box.id = 'selection-2'; document.body.appendChild(box)
+    PaperMindSidebar.selectionPopup({ reader: __reader, doc: document, params: { annotation: { text: 'Another local text.', position: { pageIndex: 2 } } }, append: node => box.appendChild(node) })
+  })
+  assert.deepEqual(await page.locator('#selection-2 button').allTextContents(), ['精读这段', '带入追问', '存为卡片'])
+  // An excerpt card keeps its translation, so it is not lost when the popup closes.
+  await page.locator('#selection-2').getByRole('button', { name: '存为卡片', exact: true }).click()
+  await page.locator('article.pmw-card').filter({ hasText: 'Another local text.' }).getByText('另一段本地文字。', { exact: true }).waitFor()
+  await page.evaluate(() => { const content = document.querySelector('.pmw-scroll'); content.scrollTop = content.scrollHeight })
+  await page.screenshot({ path: join(artifacts, 'card-translation.png') })
+  // Zotero's Settings window lists the plugin with the same AI form and switches.
+  await page.evaluate(() => {
+    const host = document.createElement('div'); host.id = 'prefs-host'
+    host.style.cssText = 'position:fixed;inset:40px 0 0 0;z-index:20;background:#fff;padding:20px;overflow:auto'
+    document.body.appendChild(host); PaperMindWorkspace.renderPreferences(host)
+  })
+  await page.locator('#prefs-host').getByRole('heading', { name: '连接个人 AI', exact: true }).waitFor()
+  assert.equal(await page.locator('#prefs-host input[type=checkbox]').count(), 2)
+  await page.screenshot({ path: join(artifacts, 'zotero-settings-pane.png') })
+  await page.evaluate(() => document.getElementById('prefs-host').remove())
   await page.getByRole('button', { name: '关闭', exact: true }).click()
   assert.equal(await page.locator('#zotero-context-pane').isVisible(), true)
   await page.evaluate(() => PaperMindSidebar.destroy())
   assert.equal(await page.locator('#papermind-panel').count(), 0)
   assert.deepEqual(errors, [])
   await assertPersonalTransport(page)
-  console.log(JSON.stringify({ ok: true, nativeZotero: false, artifacts, checks: ['start-hint','missing-abstract','missing-pdf','no-automatic-request','narrow-dark-layout','retry-from-start','local-pdf-context','page-follow','selection','guide','cards','board-note','quiz','chat','storage-reload','fixed-composer','safe-text','cleanup'] }))
+  console.log(JSON.stringify({ ok: true, nativeZotero: false, artifacts, checks: ['start-hint','missing-abstract','missing-pdf','no-automatic-request','narrow-dark-layout','retry-from-start','local-pdf-context','page-follow','selection','guide','cards','board-note','quiz','chat','storage-reload','abstract-card-source','fixed-composer','safe-text','inline-edit','menu-state','list-markdown','translate-toggle','streaming','card-translation','settings-pane','cleanup'] }))
 } finally { await browser.close() }

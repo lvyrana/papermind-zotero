@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "研雀 · LitFinch",
-  "version": "0.8.5",
-  "description": "研雀本地阅读台：个人 API 或 Codex 连接 AI，阅读记录自行保存、导出与恢复",
+  "version": "0.9.0",
+  "description": "AI 论文精读助手：边读 PDF 边提问，划词精读、翻译，做卡片、写汇报，记录保存在本机。",
   "author": "雀雀",
   "homepage_url": "https://papermindapp.com",
   "icons": {

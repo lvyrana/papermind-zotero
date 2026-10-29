@@ -16,11 +16,12 @@ node --check "$PLUGIN_DIR/workspace.js"
 node --check "$PLUGIN_DIR/account.js"
 node --check "$PLUGIN_DIR/ai.js"
 node --check "$PLUGIN_DIR/codex.js"
+node --check "$PLUGIN_DIR/prefs.js"
 python3 -m json.tool "$PLUGIN_DIR/manifest.json" >/dev/null
 
 (
     cd "$PLUGIN_DIR"
-    zip -X -q "$TMP_XPI" manifest.json bootstrap.js sidebar.js reader-context.js workspace.js account.js ai.js codex.js icon.svg LICENSE THIRD_PARTY_NOTICES.md
+    zip -X -q "$TMP_XPI" manifest.json bootstrap.js sidebar.js reader-context.js workspace.js account.js ai.js codex.js prefs.js prefs.xhtml icon.svg LICENSE THIRD_PARTY_NOTICES.md
     zip -X -q -r "$TMP_XPI" locale -i '*.ftl'
 )
 

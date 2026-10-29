@@ -125,7 +125,7 @@ var PaperMindCodex = {
   async logout(win, config) {
     await this.start(win, config); await this.rpc('account/logout'); await this.stop()
   },
-  async generate(win, messages, config, signal) {
+  async generate(win, messages, config, signal, onDelta) {
     await this.check(win, config)
     if (signal?.aborted) throw new Error('请求已取消。')
     const { thread } = await this.rpc('thread/start', { cwd: this.workdir, ephemeral: true, approvalPolicy: 'never',
@@ -139,11 +139,12 @@ var PaperMindCodex = {
         if (signal?.aborted) { finish(); return }
         signal?.addEventListener('abort', abort, { once: true })
         timer = win.setTimeout(abort, 120000)
-        let output = ''
+        let output = '', streamed = ''
         listener = message => {
           const p = message.params || {}
           if (message.method === 'litfinch/disconnected') { finish(new Error('Codex 连接已断开。')); return }
           if (p.threadId !== thread.id) return
+          if (message.method === 'item/agentMessage/delta' && typeof p.delta === 'string') { streamed += p.delta; onDelta?.(streamed) }
           if (message.method === 'item/completed' && p.item?.type === 'agentMessage') output = p.item.text || output
           if (message.method === 'turn/completed') {
             if (p.turn?.status === 'completed' && output.trim()) resolve(output)
