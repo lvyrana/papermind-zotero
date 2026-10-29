@@ -1,13 +1,15 @@
 // Optional DOM regression; uses synthetic metadata and mocked responses only.
 // PAPERMIND_PLAYWRIGHT_MODULE may point to an existing Playwright installation.
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { requireBrowserPreflight, browserOptions, installPersonalAI, assertPersonalTransport } from './browser-fixture.mjs'
 const { chromium } = await import(process.env.PAPERMIND_PLAYWRIGHT_MODULE || 'playwright')
-const browser = await chromium.launch({ headless: true,
-  ...(process.env.PAPERMIND_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PAPERMIND_CHROMIUM_EXECUTABLE } : {}) })
+requireBrowserPreflight()
+const browser = await chromium.launch(browserOptions)
 try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } })
+  page.setDefaultTimeout(5000)
+  const errors = []; page.on('pageerror', error => errors.push(error.message))
   await page.setContent(`<!doctype html><html lang="zh-CN"><body style="margin:0;height:100vh;display:flex;flex-direction:column;background:#f7f7f5">
     <div id="zotero-tabs-toolbar" style="height:42px;display:flex;align-items:center;justify-content:flex-end;border-bottom:1px solid #ddd"><button id="zotero-tb-sync">同步</button></div>
     <main style="display:flex;flex:1;min-height:0"><div id="zotero-items-tree" style="flex:1;min-width:0;padding:28px"><h2>示例论文 · PDF 阅读区</h2><p>The observed effect was uncertain.</p><div id="selection"></div></div><div id="zotero-context-splitter"></div><div id="zotero-context-pane">原生文献信息</div></main></body></html>`)
@@ -38,14 +40,14 @@ try {
       },
     }
     window.Zotero_Tabs = { selectedID: 'reader-1' }
-    window.fetch = async (url, options) => {
-      window.__requests.push({ url, body: JSON.parse(options.body) })
-      return { ok: true, json: async () => ({ ok: true,
-        guide: '原句在说什么\n效应估计存在不确定性。需要把区间估计与样本量一起读。\n\n为什么重要\n不能仅凭点估计判断干预有效。',
-        reply: '这里的区间包含无效值，因此不能排除无效。', translated: '观察到的效应存在不确定性。' }) }
+    window.__aiRespond = messages => {
+      if (messages[0].content.startsWith('将以下原文译成中文')) return '观察到的效应存在不确定性。'
+      if (messages.at(-1).content === '这里为什么不能排除无效？') return '这里的区间包含无效值，因此不能排除无效。'
+      return '原句在说什么\n效应估计存在不确定性。需要把区间估计与样本量一起读。\n\n为什么重要\n不能仅凭点估计判断干预有效。'
     }
   })
   for (const file of ['bootstrap.js', 'sidebar.js']) await page.addScriptTag({ path: fileURLToPath(new URL('../' + file, import.meta.url)) })
+  await installPersonalAI(page)
   await page.evaluate(() => {
     PaperMindSidebar.addToWindow(window)
     PaperMindSidebar.selectionPopup({ reader: { itemID: 2 }, doc: document,
@@ -92,6 +94,15 @@ try {
   assert.equal(await page.getByText('点击发送、精读或翻译时', { exact: false }).isVisible(), true)
   await page.getByRole('button', { name: '设置', exact: true }).click()
   if (process.env.PAPERMIND_SIDEBAR_SCREENSHOT) await page.screenshot({ path: process.env.PAPERMIND_SIDEBAR_SCREENSHOT, fullPage: true })
+  // A provider failure must leave a usable retry and must not create a response.
+  await page.evaluate(() => { window.__failNextRequest = true })
+  await page.getByRole('textbox', { name: '继续追问' }).fill('这里为什么不能排除无效？')
+  await page.getByRole('button', { name: '发送', exact: true }).click()
+  await page.getByText('个人 AI 服务返回 HTTP 503', { exact: false }).waitFor()
+  assert.equal(await page.evaluate(() => PaperMindSidebar.sessionFor(window.__paper).messages.length), 4)
+  assert.equal(await page.getByRole('button', { name: '发送', exact: true }).isEnabled(), true)
+  await page.getByRole('button', { name: '发送', exact: true }).click()
+  await page.waitForFunction(() => PaperMindSidebar.sessionFor(window.__paper).messages.length === 6)
   // Long answers must scroll independently without moving the composer off-screen.
   await page.evaluate(() => {
     const session = PaperMindSidebar.sessionFor(window.__paper)
@@ -130,8 +141,10 @@ try {
   await page.evaluate(() => PaperMindSidebar.removeFromWindow(window))
   assert.equal(await page.locator('#papermind-panel').count(), 0)
   assert.equal(await page.locator('#papermind-toggle').count(), 0)
+  await assertPersonalTransport(page)
+  assert.deepEqual(errors, [])
   console.log(JSON.stringify({ ok: true, mode: 'browser DOM with mocked Zotero and API',
-    checked: ['toolbar-toggle', 'selection-popup', 'explain', 'follow-up', 'save-note', 'page-link', 'clear-selection', 'long-chat-fixed-composer', 'paper-switch-draft', 'collapsed-source', 'settings-only-disclosure', 'safe-markdown', 'cleanup'],
+    checked: ['toolbar-toggle', 'selection-popup', 'explain', 'follow-up', 'save-note', 'page-link', 'clear-selection', 'provider-failure-retry', 'personal-ai-transport', 'long-chat-fixed-composer', 'paper-switch-draft', 'collapsed-source', 'settings-only-disclosure', 'safe-markdown', 'cleanup'],
     nativeZotero: false }))
 } finally {
   await browser.close()

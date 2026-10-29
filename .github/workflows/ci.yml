@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   test-and-build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -21,6 +21,17 @@ jobs:
 
       - name: Run connector tests
         run: node --test test-*.mjs
+
+      - name: Install pinned browser test dependency
+        run: npm ci --ignore-scripts
+
+      - name: Check sandboxed Chrome
+        run: test -x /opt/google/chrome/chrome
+
+      - name: Run personal AI and reading browser checks
+        run: npm run test:browser
+        env:
+          PAPERMIND_CHROMIUM_EXECUTABLE: /opt/google/chrome/chrome
 
       - name: Build XPI
         run: bash build.sh

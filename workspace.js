@@ -241,11 +241,11 @@ var PaperMindWorkspace = {
     const w = this.state(session)
     const prompt = (action === 'quizAnswer' ? w.quizDraft : session.draft).trim()
     const source = !['abstract', 'map', 'page', 'quiz'].includes(action) && session.source ? { ...session.source } : null
-    const active = PaperMindReaderContext.active(win, session.paper)
+    const active = action === 'abstract' ? null : PaperMindReaderContext.active(win, session.paper)
     const activeSnapshot = active ? { ...active } : null
     const controller = new win.AbortController()
     const request = ++session.request
-    session.busy = true; session.controller = controller; session.error = ''; session.status = '正在读取本地论文…'
+    session.busy = true; session.controller = controller; session.error = ''; session.status = action === 'abstract' ? '正在读取条目摘要…' : '正在读取本地论文…'
     this.sidebar.refresh(session)
     const current = () => request === session.request && this.sidebar.sessionFor(session.paper) === session && !controller.signal.aborted
     let timer
@@ -260,16 +260,17 @@ var PaperMindWorkspace = {
       if (action === 'guide' && !source?.text) throw new Error('请先在 PDF 中划选文字。')
       if ((source?.text.length || 0) > 6000) throw new Error('选段超过 6000 字，请缩小选区。')
       if (source && activeSnapshot && source.attachmentKey !== activeSnapshot.attachment.key) throw new Error('选段属于另一附件，请重新划选。')
-      timer = win.setTimeout(() => controller.abort(), 90000)
-      const context = await PaperMindReaderContext.collect(activeSnapshot, prompt + ' ' + (source?.text || ''), controller.signal)
-      if (!current()) return
       const paper = PaperMind.buildPaper(session.paper)
+      if (action === 'abstract' && !paper.abstract.trim()) throw new Error('条目没有摘要，可使用阅读路线或读当前页。')
+      timer = win.setTimeout(() => controller.abort(), 90000)
+      const context = action === 'abstract' ? { page: null, currentText: '', pages: '', coverage: '依据条目摘要' }
+        : await PaperMindReaderContext.collect(activeSnapshot, prompt + ' ' + (source?.text || ''), controller.signal)
+      if (!current()) return
       if (action === 'page' && !context.currentText.trim()) throw new Error('当前页没有可读取的文字层。仍可划选可用文字，或读摘要。')
-      if (action === 'abstract' && !paper.abstract) throw new Error('条目没有摘要，可使用阅读路线或读当前页。')
       if (!paper.abstract && !context.currentText && !context.pages.replace(/^\[读取范围[^\n]*\]\n?/, '').trim() && !source?.text) throw new Error('尚未读到论文文字，请等待 PDF 加载后重试。')
       const instructions = {
         map: '为这篇论文制定具体阅读路线：先明确文献类型和研究问题，再指出应该核对的证据和局限。依据给出的页码内容，不预设文章一定是临床试验。',
-        abstract: '带读这篇论文的摘要，解释研究问题、文献类型、主要结论及证据边界。',
+        abstract: '带读这篇论文的摘要。',
         page: '带读当前页，解释本页关键概念、论证和数字。标明原文页码，不把本页没有的信息当成已知。',
         guide: '精读选中的这段原文：拆解语义，解释关键术语，再联系本文前后文；区分作者陈述与推断，保留原文限定词。',
         quiz: '基于给出的本文原文与阅读卡片，提出一个需要理解而非背诵的问题。一次只问一题，先不要给答案。附可回看的 PDF 页码。',
@@ -278,7 +279,8 @@ var PaperMindWorkspace = {
       const history = action === 'quizAnswer' ? w.quiz : action === 'chat' ? session.messages : []
       const userMessage = (instructions[action] || prompt).slice(0, 2000)
       const cards = action.startsWith('quiz') ? w.cards.slice(-6).map(x => x.content).join('\n').slice(0, 2500) : ''
-      const payload = { paper_title: paper.title.slice(0, 500), paper_abstract: paper.abstract.slice(0, 5000),
+      const paperFields = { paper_title: paper.title.slice(0, 500), paper_abstract: paper.abstract.slice(0, 5000) }
+      const payload = action === 'abstract' ? { ...paperFields, mode: 'abstract' } : { ...paperFields,
         paper_rowid: 0, message: userMessage,
         history: history.slice(-8).map(({ role, content }) => ({ role, content: content.slice(0, 8000) })),
         current_page: context.page, current_page_text: context.currentText,

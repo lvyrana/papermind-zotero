@@ -4,9 +4,11 @@ import { fileURLToPath } from 'node:url'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { requireBrowserPreflight, browserOptions, installPersonalAI, assertPersonalTransport } from './browser-fixture.mjs'
 const { chromium } = await import(process.env.PAPERMIND_PLAYWRIGHT_MODULE || 'playwright')
 const artifacts = await mkdtemp(join(tmpdir(), 'litfinch-workspace-'))
-const browser = await chromium.launch({ headless: true, chromiumSandbox: true, ...(process.env.PAPERMIND_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PAPERMIND_CHROMIUM_EXECUTABLE } : {}) })
+requireBrowserPreflight()
+const browser = await chromium.launch(browserOptions)
 try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 820 } })
   page.setDefaultTimeout(5000)
@@ -16,10 +18,13 @@ try {
   await page.goto('https://local-papermind.test')
   await page.setContent(`<html><body style="margin:0;height:100vh;display:flex;flex-direction:column"><div id="zotero-tabs-toolbar" style="height:40px;display:flex;justify-content:end"><button id="zotero-tb-sync">同步</button></div><main style="display:flex;flex:1;min-height:0"><section id="zotero-items-tree" style="flex:1;padding:25px;background:#eee"><h2>本地 PDF · 模拟宿主</h2><p>The intervention estimate was uncertain.</p><div id="selection"></div></section><div id="zotero-context-splitter"></div><div id="zotero-context-pane">原生详情</div></main></body></html>`)
   await page.evaluate(() => {
-    const files = window.__files = new Map(), requests = window.__requests = [], notes = window.__notes = []
+    const files = window.__files = new Map(), notes = window.__notes = []
     const paper = window.__paper = { id: 1, key: 'PAPER123', libraryID: 1, isRegularItem: () => true, getCreators: () => [], getField: field => ({ title: '示例论文：干预效果与证据边界', abstractNote: 'Uncertain intervention estimates.' }[field] || '') }
     const attachment = window.__attachment = { id: 2, key: 'PDF12345', libraryID: 1, parentItemID: 1, isAttachment: () => true }
-    const app = window.__pdfApp = { pdfViewer: { currentPageNumber: 2 }, pdfDocument: { numPages: 3, getPage: async n => ({ getTextContent: async () => ({ items: [{ str: ['Background and study design.', 'Intervention estimates with confidence intervals.', 'Limitations and follow up.'][n - 1] }] }) }) } }
+    window.__pdfReads = 0
+    const app = window.__pdfApp = { pdfViewer: { currentPageNumber: 2 }, pdfDocument: { numPages: 3, getPage: async n => {
+      window.__pdfReads++; return { getTextContent: async () => ({ items: [{ str: ['Background and study design.', 'Intervention estimates with confidence intervals.', 'Limitations and follow up.'][n - 1] }] }) }
+    } } }
     const reader = window.__reader = { itemID: 2, _internalReader: { _primaryView: { _iframeWindow: { PDFViewerApplication: app } } } }
     const prefs = new Map([['extensions.papermind.uid', '123e4567-e89b-42d3-a456-426614174000'], ['extensions.papermind.configVersion', 3]])
     window.IOUtils = { makeDirectory: async () => {}, exists: async path => files.has(path), readJSON: async path => JSON.parse(files.get(path)), writeJSON: async (path, data) => files.set(path, JSON.stringify(data)) }
@@ -33,18 +38,15 @@ try {
       Libraries: { get: () => ({ libraryType: 'user', editable: true }) },
       Reader: { getByTabID: () => reader, registerEventListener() {}, _unregisterEventListenerByPluginID() {}, open: async (id, location) => { window.__lastOpen = { id, location } } },
       Item: class { setNote(html) { this.html = html } async saveTx() { notes.push(this.html); return notes.length } } }
-    window.fetch = async (url, options) => {
-      const payload = JSON.parse(options.body); requests.push(payload)
-      if (window.__failNextRequest) {
-        window.__failNextRequest = false
-        return { ok: true, json: async () => ({ ok: false, error: '模拟服务暂不可用' }) }
-      }
-      return { ok: true, json: async () => ({ ok: true, reply: payload.message.includes('一次只问一题') ? '如何根据区间估计判断不确定性？请回看第 2 页。' : '应结合区间估计与研究设计判断，原文第 2 页给出了估计范围。' }) }
-    }
+    window.__aiRespond = messages => messages.at(-1).content.includes('带读这篇论文的摘要')
+      ? '这项研究评估干预效果，摘要报告的估计范围较宽。阅读时先抓住主要结果和估计精度。'
+      : messages.at(-1).content.includes('一次只问一题')
+      ? '如何根据区间估计判断不确定性？请回看第 2 页。'
+      : '应结合区间估计与研究设计判断，原文第 2 页给出了估计范围。'
   })
   for (const file of ['bootstrap.js', 'sidebar.js', 'reader-context.js', 'workspace.js']) await page.addScriptTag({ path: fileURLToPath(new URL('../' + file, import.meta.url)) })
+  await installPersonalAI(page)
   await page.evaluate(() => {
-    PaperMind.ai = { ensure: async () => true, request: async (win, endpoint, payload) => (await win.fetch('https://synthetic-ai.test' + endpoint, { body: JSON.stringify(payload) })).json() }
     PaperMindWorkspace.install(PaperMindSidebar); PaperMindSidebar.workspace = PaperMindWorkspace; PaperMindSidebar.init('file:///mock/')
   })
   await page.getByRole('button', { name: '研雀阅读台', exact: true }).click()
@@ -87,14 +89,19 @@ try {
     PaperMindSidebar.refresh(PaperMindSidebar.sessionFor(__paper))
   })
   await page.getByRole('button', { name: '读摘要', exact: true }).click()
-  await page.getByRole('alert').filter({ hasText: '模拟服务暂不可用' }).waitFor()
+  await page.getByRole('alert').filter({ hasText: '个人 AI 服务返回 HTTP 503' }).waitFor()
   assert.equal(await hint.isVisible(), true)
   assert.equal(await page.getByRole('button', { name: '读摘要', exact: true }).isEnabled(), true)
   await page.getByRole('button', { name: '读摘要', exact: true }).click()
   await page.getByRole('heading', { name: '摘要带读', exact: true }).waitFor()
   assert.equal(await hint.count(), 0)
   assert.equal(await page.evaluate(() => __requests.length), 2)
-  assert.match(await page.evaluate(() => __requests.at(-1).message), /带读这篇论文的摘要/)
+  assert.match(await page.evaluate(() => __requests.at(-1).body.messages.at(-1).content), /带读这篇论文的摘要/)
+  assert.equal(await page.evaluate(() => __pdfReads), 0)
+  const abstractMaterial = await page.evaluate(() => JSON.parse(__requests.at(-1).body.messages[1].content.split('\n').slice(1).join('\n')))
+  assert.deepEqual(Object.keys(abstractMaterial).sort(), ['abstract', 'title'])
+  assert.equal(abstractMaterial.abstract, 'Uncertain intervention estimates.')
+  assert.equal(await page.evaluate(() => PaperMindWorkspace.state(PaperMindSidebar.sessionFor(__paper)).coverage), '依据条目摘要')
   await page.setViewportSize({ width: 1100, height: 820 })
   await page.evaluate(() => {
     const getField = __paper.getField
@@ -134,8 +141,8 @@ try {
       requests: __requests, messages: PaperMindSidebar.sessionFor(__paper).messages })))
     throw error
   })
-  const payload = await page.evaluate(() => __requests.at(-1))
-  assert.equal(payload.current_page, 3); assert.equal(payload.quote.text, 'Selected local text.')
+  const payload = await page.evaluate(() => JSON.parse(__requests.at(-1).body.messages[1].content.split('\n').slice(1).join('\n')))
+  assert.equal(payload.page, 3); assert.equal(payload.quote.text, 'Selected local text.')
   assert.match(payload.paper_pages, /第 1 页/)
   await page.evaluate(() => {
     const s = PaperMindSidebar.sessionFor(__paper)
@@ -168,5 +175,6 @@ try {
   await page.evaluate(() => PaperMindSidebar.destroy())
   assert.equal(await page.locator('#papermind-panel').count(), 0)
   assert.deepEqual(errors, [])
+  await assertPersonalTransport(page)
   console.log(JSON.stringify({ ok: true, nativeZotero: false, artifacts, checks: ['start-hint','missing-abstract','missing-pdf','no-automatic-request','narrow-dark-layout','retry-from-start','local-pdf-context','page-follow','selection','guide','cards','board-note','quiz','chat','storage-reload','fixed-composer','safe-text','cleanup'] }))
 } finally { await browser.close() }
