@@ -18,6 +18,7 @@
 
 var PaperMind = {
   MENU_ID: 'papermind-open-menuitem',
+  WEB_MENU_ID: 'papermind-web-menuitem',
   TOOLS_ID: 'papermind-settings-menuitem',
   PREF_BASE: 'extensions.papermind.baseURL',
   PREF_UID: 'extensions.papermind.uid',
@@ -162,6 +163,8 @@ var PaperMind = {
     if (error && error.status === 403) {
       return '当前设备没有这项操作权限。请重新粘贴研雀设置页里的“我的专属链接”。'
     }
+    // The site answered with its own reason (e.g. 410 archive mode); a network hint would mislead.
+    if (error && error.status) return ''
     if (this.isLocalBase(base)) {
       return '插件仍在连接本机开发地址。请打开 Zotero「工具 → 研雀连接设置…」，改为线上专属链接。'
     }
@@ -311,8 +314,9 @@ var PaperMind = {
     }), '确认 PDF 保存')
   },
 
-  async openSelected(win) {
-    if (this.getBaseURL() === this.DEFAULT_BASE) {
+  // 「用研雀精读」在 Zotero 内阅读；「在研雀网页端打开」走原来的保存、上传、打开网页流程。
+  async openSelected(win, { web = false } = {}) {
+    if (!web && this.getBaseURL() === this.DEFAULT_BASE) {
       this.sidebar?.focusPane(win)
       return
     }
@@ -330,7 +334,17 @@ var PaperMind = {
       return
     }
 
-    if (!await this.ensureConnection(win)) return
+    const needsAccount = web && this.getBaseURL() === this.DEFAULT_BASE && !this.account?.record()
+    if (needsAccount) await this.account?.start(win)
+    if (needsAccount || !await this.ensureConnection(win)) {
+      // The account section is hidden in the panel, so say what the browser tab is for.
+      if (web && this.account) {
+        Services.prompt.alert(win, '研雀', this.account.pending
+          ? `网页端需要先登录研雀账号。已在浏览器打开登录页，连接码：${this.account.pending.code}。\n确认后回到 Zotero，再点一次「在研雀网页端打开」。`
+          : '网页端登录未能开始：' + this.account.status)
+      }
+      return
+    }
     const base = this.getBaseURL()
 
     try {
@@ -371,7 +385,7 @@ var PaperMind = {
     } catch (e) {
       this.log('openSelected failed: ' + e)
       Services.prompt.alert(win, '研雀',
-        '发送失败：' + e.message + '\n\n' + this.connectionMessage(e, base))
+        ['发送失败：' + e.message, this.connectionMessage(e, base)].filter(Boolean).join('\n\n'))
     }
   },
 
@@ -388,6 +402,11 @@ var PaperMind = {
       mi.setAttribute('label', '用研雀精读')
       mi.addEventListener('command', () => this.openSelected(win))
       itemMenu.appendChild(mi)
+      const web = doc.createXULElement('menuitem')
+      web.id = this.WEB_MENU_ID
+      web.setAttribute('label', '在研雀网页端打开')
+      web.addEventListener('command', () => this.openSelected(win, { web: true }))
+      itemMenu.appendChild(web)
     }
 
     // Tools 菜单：连接设置
@@ -408,7 +427,7 @@ var PaperMind = {
   removeFromWindow(win) {
     this.sidebar?.removeFromWindow(win)
     const doc = win.document
-    for (const id of [this.MENU_ID, this.TOOLS_ID]) {
+    for (const id of [this.MENU_ID, this.WEB_MENU_ID, this.TOOLS_ID]) {
       const el = doc.getElementById(id)
       if (el) el.remove()
     }

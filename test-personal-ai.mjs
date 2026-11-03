@@ -67,11 +67,63 @@ test('both abstract entry points isolate title and abstract at the provider boun
     assert.deepEqual(JSON.parse(messages[1].content.split('\n').slice(1).join('\n')),
       { title: payload.paper_title, abstract: payload.paper_abstract })
     assert.doesNotMatch(JSON.stringify(messages), /sentinel|long critique/)
-    assert.match(messages.at(-1).content, /200—250字/)
-    assert.match(messages.at(-1).content, /最多3个短段/)
+    assert.match(messages.at(-1).content, /主要发现的具体数字/)
+    assert.doesNotMatch(messages.at(-1).content, /\d+字/)
     assert.match(messages[0].content, /不得操作文件、调用工具/)
-    assert.match(messages[0].content, /回答追问时直接回答问题，一般不超过200字/)
+    assert.match(messages[0].content, /回答中不标注页码/)
+    assert.match(messages[0].content, /每次回答最长约 1000 字/)
   }
+})
+
+test('chat sends the paper as readable text first, then history, then where the reader is, then the question', () => {
+  const { ai } = fixture()
+  const messages = ai.messages('/api/chat', { paper_title: 'T', paper_abstract: 'A', current_page: 4, current_page_text: 'Page four',
+    paper_pages: '[读取范围：全文 2 页]\n[PDF 第 1 页]\nOne\n\n[PDF 第 4 页]\nFour', quote: { text: 'Chosen words', page: 4 },
+    history: [{ role: 'user', content: 'Earlier' }, { role: 'assistant', content: '我只能看到第 5 页' }], message: '这个量表是什么？' })
+  assert.deepEqual([...messages].map(x => x.role), ['system', 'user', 'user', 'assistant', 'user', 'user'])
+  assert.match(messages[1].content, /^论文材料\n\n题名：T\n\n摘要：A\n\n\[读取范围：全文 2 页\]/)
+  assert.doesNotMatch(messages[1].content, /Page four|"page"/)
+  assert.equal(messages[4].content, '读者此刻停在 PDF 第 4 页。\n读者选中的原文（PDF 第 4 页）：\n「Chosen words」')
+  assert.equal(messages[5].content, '这个量表是什么？')
+  assert.match(messages[0].content, /对话历史里如果说过「看不到某页」/)
+})
+
+test('a context-length refusal is recognised; other provider errors keep the generic message', async () => {
+  const f = fixture()
+  await f.ai.save({ mode: 'api', base: 'http://localhost/v1', model: 'small' })
+  for (const [status, body, code] of [
+    [400, '{"error":{"code":"context_length_exceeded","message":"This model\'s maximum context length is 32768 tokens"}}', 'CONTEXT_TOO_LONG'],
+    [413, '', 'CONTEXT_TOO_LONG'],
+    [400, 'Input length must be less than 32768', 'CONTEXT_TOO_LONG'],
+    [422, 'Prompt is too long', 'CONTEXT_TOO_LONG'],
+    [429, 'Token limit per minute exceeded', undefined],
+    [429, 'maximum context length exceeded', undefined],
+    [400, 'Too many tokens per minute', undefined],
+    [422, 'Too many input tokens: TPM rate limit', undefined],
+    [401, '{"error":{"message":"Incorrect API key"}}', undefined],
+  ]) {
+    f.win.fetch = async () => ({ ok: false, status, text: async () => body })
+    const error = await f.ai.request(f.win, '/api/chat', { message: 'x', paper_pages: 'p' }).catch(e => e)
+    assert.equal(error.code, code, String(status))
+    if (!code) assert.ok(error.message.includes(`HTTP ${status}`))
+  }
+})
+
+test('page 201 reaches the provider beside the question without changing the stable paper material', async () => {
+  const f = fixture()
+  vm.runInContext(fs.readFileSync(new URL('reader-context.js', import.meta.url), 'utf8'), f.ctx)
+  const pdf = { numPages: 201, getPage: async n => ({ getTextContent: async () => ({ items: [{ str: n === 201 ? 'CURRENT_PAGE_201_ONLY' : `Page ${n}` }] }) }) }
+  const context = await f.ctx.PaperMindReaderContext.collect({ pdf, page: 201 })
+  await f.ai.save({ mode: 'api', base: 'http://localhost/v1', model: 'reader' })
+  await f.ai.request(f.win, '/api/chat', { paper_pages: context.pages, current_page: context.page,
+    current_page_text: context.currentText, message: 'Explain this page' })
+  const messages = JSON.parse(f.requests.at(-1).body).messages
+  assert.doesNotMatch(messages[1].content, /CURRENT_PAGE_201_ONLY/)
+  assert.match(messages.at(-2).content, /\[读者当前页 · PDF 第 201 页\]\nCURRENT_PAGE_201_ONLY/)
+  assert.equal(messages.at(-1).content, 'Explain this page')
+  const full = f.ai.messages('/api/chat', { paper_pages: '[PDF 第 201 页]\nCURRENT_PAGE_201_ONLY',
+    current_page: 201, current_page_text: 'CURRENT_PAGE_201_ONLY', message: 'Explain' })
+  assert.equal(JSON.stringify(full).split('CURRENT_PAGE_201_ONLY').length - 1, 1)
 })
 
 test('API routes translation independently while reading operations keep the reading model', async () => {

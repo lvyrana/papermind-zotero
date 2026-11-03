@@ -293,7 +293,8 @@ var PaperMindSidebar = {
         if (action === 'card') void this.workspace.capture(session)
         else if (action) void this.run(session, action, win)
         else if (this.SHOW_WORKSPACE) {
-          this.workspace.state(session).mode = 'chat'
+          // Focus the question box so the reader can type or dictate right away.
+          Object.assign(this.workspace.state(session), { mode: 'read', focusAsk: true })
           this.refresh(session)
         }
       })

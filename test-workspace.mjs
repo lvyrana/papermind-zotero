@@ -37,6 +37,8 @@ function fixture(files = new Map()) {
   return { ctx, sidebar, workspace, context, session, win, paper, attachment, reader, app, pdf, texts, requests, notes, prefs, files, writes, io, reads: () => reads }
 }
 
+const latest = f => f.session.messages.filter(x => x.role === 'assistant' && x.kind === 'read').at(-1)
+
 test('portable reading export excludes credentials and restore keeps the previous revision', async () => {
   const f = fixture(); await f.workspace.load(f.session)
   f.workspace.state(f.session).cards = [{ content: 'Keep this', id: 'card-1', noteID: 999 }]
@@ -87,7 +89,7 @@ test('start hint falls back to the local PDF, or explains how to supply missing 
 
 test('existing reading work, a selection or a draft takes priority over the start hint', async () => {
   for (const prepare of [
-    (w) => { w.guide = { content: 'Existing guide' } },
+    (w, s) => { s.messages.push({ role: 'assistant', content: 'Existing reading', kind: 'read' }) },
     (w) => { w.cards.push({ content: 'Existing card' }) },
     (w) => { w.board.push({ content: 'Existing board entry' }) },
     (w) => { w.quiz.push({ content: 'Existing quiz' }) },
@@ -115,7 +117,7 @@ test('abstract cards never borrow the current selection and remain source-free a
   const f = fixture()
   f.session.source = { text: 'Unrelated selected methods', page: 2, attachmentKey: f.attachment.key, libraryID: 1 }
   await f.workspace.run(f.session, 'abstract', f.win)
-  const result = f.workspace.state(f.session).guide
+  const result = latest(f)
   assert.equal(result.source, null)
   await f.workspace.capture(f.session, result)
   assert.equal(f.workspace.state(f.session).cards[0].source, null)
@@ -172,15 +174,28 @@ test('inline editing saves multi-paragraph text, rejects empty drafts and create
   assert.deepEqual([w.cards.length, w.cards[1].content, w.cards[1].origin, w.editing], [2, 'Personal judgement', '个人笔记', null])
 })
 
-test('reading tasks state their own length so answers stay short', async () => {
-  for (const [action, pattern] of [['page', /约250—350字/], ['guide', /约200—300字/], ['map', /最多5步/]]) {
+test('reading tasks ask for concrete content, not a word count or page citations', async () => {
+  for (const [action, pattern] of [['page', /PDF 第 2 页.*具体信息/], ['guide', /具体含义/], ['map', /具体问题/]]) {
     const f = fixture()
     if (action === 'guide') f.session.source = { text: 'Selected body paragraph', page: 2, attachmentKey: f.attachment.key, libraryID: 1 }
     await f.workspace.run(f.session, action, f.win)
     assert.equal(f.session.error, '')
     assert.match(f.requests.at(-1).payload.message, pattern)
-    assert.match(f.requests.at(-1).payload.message, /不写标题/)
+    assert.doesNotMatch(f.requests.at(-1).payload.message, /\d+字|最多\d+|页码/)
   }
+})
+
+test('a journal-length PDF is sent whole and uncut, labelled page by page', async () => {
+  const f = fixture()
+  f.texts[1] = 'Methods detail. '.repeat(500) + 'Scale sentinel at the end of page two.'
+  const data = await f.context.collect(f.context.active(f.win, f.paper))
+  assert.equal(data.coverage, '全文 4 页')
+  for (const n of [1, 2, 3, 4]) assert.match(data.pages, new RegExp(`\\[PDF 第 ${n} 页\\]`))
+  assert.match(data.pages, /Scale sentinel at the end of page two\./)
+  assert.doesNotMatch(data.pages, /节选/)
+  f.session.draft = 'Which scale?'
+  await f.workspace.run(f.session, 'chat', f.win)
+  assert.match(f.requests.at(-1).payload.paper_pages, /Scale sentinel/)
 })
 
 test('excerpt cards carry a translation that survives reload and backup; edits clear it and failures offer a retry', async () => {
@@ -217,7 +232,7 @@ test('excerpt cards carry a translation that survives reload and backup; edits c
 test('restored abstract cards and board entries stay deduplicated with omitted sources', async () => {
   const f = fixture()
   await f.workspace.run(f.session, 'abstract', f.win)
-  const result = f.workspace.state(f.session).guide
+  const result = latest(f)
   await f.workspace.capture(f.session, result)
   await f.workspace.toBoard(f.session, result, '背景')
   const packet = JSON.parse(JSON.stringify(f.workspace.backup(f.session)))
@@ -226,9 +241,9 @@ test('restored abstract cards and board entries stay deduplicated with omitted s
   for (const current of [f, fixture(f.files)]) {
     await current.workspace.load(current.session)
     const w = current.workspace.state(current.session)
-    await current.workspace.capture(current.session, w.guide)
+    await current.workspace.capture(current.session, latest(current))
     await current.workspace.toBoard(current.session, result, '背景')
-    await current.workspace.toBoard(current.session, w.guide, '背景')
+    await current.workspace.toBoard(current.session, latest(current), '背景')
     await current.workspace.toBoard(current.session, w.cards[0], '背景')
     assert.deepEqual([w.cards.length, w.board.length], [1, 1])
   }
@@ -334,9 +349,9 @@ test('caps evidence packet with an honest partial coverage label', async () => {
   f.pdf.numPages = 250
   f.pdf.getPage = async n => ({ getTextContent: async () => ({ items: [{ str: `Page ${n} ` + 'x'.repeat(6000) }] }) })
   const data = await f.context.collect(f.context.active(f.win, f.paper))
-  assert.ok(data.pages.length <= 24000)
+  assert.ok(data.pages.length <= 62000)
   assert.match(data.coverage, /不代表全部内容/)
-  assert.match(data.pages, /PDF 第 2 页 · 节选/)
+  assert.match(data.pages, /PDF 第 2 页\]/)
 })
 
 test('cards and board survive a fresh session, use atomic writes and hashed identity filenames', async () => {
@@ -404,10 +419,10 @@ test('abstract reading sends only entry metadata and works without extracting PD
   assert.equal(f.reads(), 0)
   assert.equal(f.requests.length, 1)
   assert.deepEqual(f.requests[0].payload, { paper_title: 'Test PDF', paper_abstract: 'Synthetic abstract', mode: 'abstract' })
-  assert.equal(f.workspace.state(f.session).guide.coverage, '依据条目摘要')
-  assert.equal(f.workspace.state(f.session).guide.source, null)
+  assert.equal(latest(f).coverage, '依据条目摘要')
+  assert.equal(latest(f).source, null)
   assert.equal(f.session.draft, 'Unsent draft about another detail')
-  assert.equal(f.session.messages.length, 1)
+  assert.equal(f.session.messages.length, 3)
 })
 
 test('missing abstract fails before PDF extraction or a provider request', async () => {
@@ -429,7 +444,7 @@ test('reading routes and current-page reading retain PDF context', async () => {
     assert.equal(f.requests[0].payload.current_page, 2)
     assert.match(f.requests[0].payload.current_page_text, /Current methods/)
     assert.match(f.requests[0].payload.paper_pages, /Results no association/)
-    assert.notEqual(f.workspace.state(f.session).guide.coverage, '依据条目摘要')
+    assert.notEqual(latest(f).coverage, '依据条目摘要')
   }
 })
 
@@ -437,9 +452,10 @@ test('reading modes and quiz run in the plugin and quiz answers retain the quest
   const f = fixture()
   for (const action of ['map', 'abstract', 'page']) {
     await f.workspace.run(f.session, action, f.win)
-    assert.ok(f.workspace.state(f.session).guide.content)
-    assert.equal(f.session.messages.length, 0)
+    assert.ok(latest(f).content)
+    assert.equal(f.requests.at(-1).payload.history?.length || 0, 0)
   }
+  assert.deepEqual([...f.session.messages].map(x => x.kind), Array(6).fill('read'))
   await f.workspace.run(f.session, 'quiz', f.win)
   const w = f.workspace.state(f.session)
   assert.equal(w.quiz.length, 2)
@@ -448,6 +464,134 @@ test('reading modes and quiz run in the plugin and quiz answers retain the quest
   assert.equal(f.requests.at(-1).payload.history.length, 2)
   assert.match(f.requests.at(-1).payload.message, /My answer/)
   assert.equal(w.quiz.length, 4)
+})
+
+test('reading results and questions share one timeline; follow-ups see the reading as history', async () => {
+  const f = fixture()
+  await f.workspace.run(f.session, 'page', f.win)
+  await f.workspace.run(f.session, 'abstract', f.win)
+  f.session.draft = '这里的结果说明什么'
+  await f.workspace.run(f.session, 'chat', f.win)
+  assert.deepEqual([...f.session.messages].map(x => [x.role, x.kind || 'chat']), [['user', 'read'], ['assistant', 'read'],
+    ['user', 'read'], ['assistant', 'read'], ['user', 'chat'], ['assistant', 'chat']])
+  assert.equal(f.session.messages[0].content, '第 2 页带读')
+  const history = f.requests.at(-1).payload.history
+  assert.deepEqual(history.map(x => x.content.slice(0, 7)), ['第 2 页带读', 'Synthet', '摘要带读', 'Synthet'])
+  assert.equal(f.workspace.state(f.session).mode, 'read')
+  const packet = JSON.parse(JSON.stringify(f.workspace.backup(f.session)))
+  assert.equal(f.workspace.validateBackup(packet, f.session).messages[1].kind, 'read')
+})
+
+test('a reading result saved by 0.9 joins the end of the timeline on load and restore', async () => {
+  const f = fixture(), path = await f.workspace.path(f.session)
+  const guide = { role: 'assistant', content: 'Saved page reading', question: '第 2 页带读', source: null }
+  f.files.set(path, JSON.stringify({ version: 1, cards: [], board: [], quiz: [], draft: '', guide,
+    messages: [{ role: 'user', content: 'Earlier question' }, { role: 'assistant', content: 'Earlier answer' }] }))
+  await f.workspace.load(f.session)
+  assert.deepEqual([...f.session.messages].map(x => x.content), ['Earlier question', 'Earlier answer', '第 2 页带读', 'Saved page reading'])
+  assert.equal(latest(f).question, '第 2 页带读')
+  await f.workspace.persist(f.session)
+  assert.equal(JSON.parse(f.files.get(path)).guide, null)
+  const packet = { format: 'litfinch-reading', version: 1, paper: { key: f.paper.key },
+    record: { version: 1, cards: [], board: [], quiz: [], messages: [], draft: '', guide } }
+  f.io.copy = async (from, to) => f.files.set(to, f.files.get(from))
+  await f.workspace.restore(f.session, packet)
+  assert.deepEqual([...f.session.messages].map(x => x.kind), ['read', 'read'])
+})
+
+test('legacy follow-up and already-folded backups retain one copy of the reading answer', async () => {
+  const f = fixture(), path = await f.workspace.path(f.session)
+  const guide = { role: 'assistant', content: 'Already in history', question: '第 2 页带读' }
+  const record = { version: 1, cards: [], board: [], quiz: [], draft: '', guide,
+    messages: [{ role: 'user', content: guide.question }, { ...guide }] }
+  f.files.set(path, JSON.stringify(record))
+  const copies = session => session.messages.filter(x => x.role === 'assistant' && x.content === guide.content).length
+  await f.workspace.load(f.session)
+  assert.equal(copies(f.session), 1)
+  await f.workspace.persist(f.session)
+  const fresh = fixture(f.files)
+  await fresh.workspace.load(fresh.session)
+  assert.equal(copies(fresh.session), 1)
+  const packet = JSON.parse(JSON.stringify(f.workspace.backup(f.session)))
+  packet.record.guide = guide
+  packet.record.messages.forEach(x => { x.kind = 'read' })
+  f.io.copy = async (from, to) => f.files.set(to, f.files.get(from))
+  await f.workspace.restore(f.session, packet)
+  assert.equal(copies(f.session), 1)
+  await f.workspace.persist(f.session)
+  const restored = fixture(f.files)
+  await restored.workspace.load(restored.session)
+  assert.equal(copies(restored.session), 1)
+})
+
+test('a model too small for the whole paper gets selected pages once, and keeps getting them for this paper', async () => {
+  const f = fixture(), sent = []
+  f.ctx.PaperMind.ai.request = async (win, endpoint, payload) => {
+    sent.push(payload.paper_pages)
+    if (payload.paper_pages.includes('[读取范围：全文')) throw Object.assign(new Error('论文全文超出所选模型的上下文长度。'), { code: 'CONTEXT_TOO_LONG' })
+    return { ok: true, reply: 'Answer from selected pages.' }
+  }
+  f.session.draft = 'Explain the methods'
+  await f.workspace.run(f.session, 'chat', f.win)
+  assert.equal(f.session.error, '')
+  assert.equal(sent.length, 2)
+  assert.match(sent[1], /本次提供 \d+ 页/)
+  assert.equal(f.session.messages.at(-1).content, 'Answer from selected pages.')
+  f.session.draft = 'And the results?'
+  await f.workspace.run(f.session, 'chat', f.win)
+  assert.equal(sent.length, 3)
+  assert.doesNotMatch(sent[2], /\[读取范围：全文/)
+  // Other failures are not retried.
+  const g = fixture(); let calls = 0
+  g.ctx.PaperMind.ai.request = async () => { calls++; throw new Error('个人 AI 服务返回 HTTP 401') }
+  g.session.draft = 'x'
+  await g.workspace.run(g.session, 'chat', g.win)
+  assert.deepEqual([calls, /401/.test(g.session.error)], [1, true])
+})
+
+test('failed selected-page retries do not change the next whole-paper request', async () => {
+  for (const invalidReply of [false, true]) {
+    const f = fixture(), sent = []
+    f.ctx.PaperMind.ai.request = async (win, endpoint, payload) => {
+      sent.push(payload.paper_pages)
+      if (sent.length === 1) throw Object.assign(new Error('Too long'), { code: 'CONTEXT_TOO_LONG' })
+      if (sent.length === 2) {
+        if (invalidReply) return { ok: false, error: 'No answer' }
+        throw new Error('Service unavailable')
+      }
+      return { ok: true, reply: 'Whole paper answer' }
+    }
+    f.session.draft = 'Explain'
+    await f.workspace.run(f.session, 'chat', f.win)
+    assert.ok(f.session.error)
+    assert.equal(Boolean(f.workspace.state(f.session).partialContext), false)
+    await f.workspace.run(f.session, 'chat', f.win)
+    assert.equal(sent.length, 3)
+    assert.match(sent[2], /\[读取范围：全文/)
+  }
+})
+
+test('HTTP input-length errors retry with selected pages while token rate limits do not', async () => {
+  for (const status of [400, 429]) {
+    const f = fixture()
+    vm.runInContext(fs.readFileSync(new URL('ai.js', import.meta.url), 'utf8'), f.ctx)
+    const ai = f.ctx.PaperMindAI
+    f.ctx.PaperMind.ai = ai
+    ai.config = () => ({ mode: 'api', base: 'http://localhost/v1', model: 'reader' })
+    ai.key = () => ''; ai.ensure = async () => true
+    let calls = 0
+    f.win.fetch = async (url, options) => {
+      calls++
+      if (JSON.parse(options.body).messages[1].content.includes('[读取范围：全文')) {
+        return { ok: false, status, text: async () => status === 400 ? 'Input length must be less than 32768' : 'Token limit per minute exceeded' }
+      }
+      return { ok: true, json: async () => ({ choices: [{ message: { content: 'Selected-page answer' } }] }) }
+    }
+    f.session.draft = 'Explain'
+    await f.workspace.run(f.session, 'chat', f.win)
+    assert.equal(calls, status === 400 ? 3 : 1) // 400 also exercises the existing non-stream fallback.
+    assert.equal(Boolean(f.workspace.state(f.session).partialContext), status === 400)
+  }
 })
 
 test('cancel and identity changes discard late responses', async () => {
@@ -480,7 +624,7 @@ test('page and selection are captured before asynchronous extraction', async () 
   await f.workspace.run(f.session, 'guide', f.win)
   assert.equal(f.requests[0].payload.current_page, 2)
   assert.equal(f.requests[0].payload.quote.text, 'Old selected passage')
-  assert.equal(f.workspace.state(f.session).guide.source.page, 2)
+  assert.equal(latest(f).source.page, 2)
 })
 
 test('board note export is escaped, read-only guarded and duplicate-safe', async () => {

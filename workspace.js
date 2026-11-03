@@ -3,6 +3,7 @@
 var PaperMindWorkspace = {
   boardSections: ['背景', '方法', '发现', '局限与启发'],
   cardTranslatePref: 'extensions.papermind.cardTranslate',
+  contextLimit: 130000,
 
   install(sidebar) {
     this.sidebar = sidebar
@@ -76,9 +77,17 @@ var PaperMindWorkspace = {
     } finally { win.clearTimeout(timer); w.translating.delete(card); this.sidebar.refresh(session) }
   },
 
+  // 0.9 kept one reading result apart from the chat; it now joins the timeline.
+  foldGuide(session, guide) {
+    if (!guide) return
+    if (session.messages.some(message => message.role === 'assistant' && message.content === guide.content)) return
+    const question = guide.question || '带读'
+    session.messages.push({ role: 'user', content: question, display: question, kind: 'read' }, { ...guide, role: 'assistant', kind: 'read' })
+  },
+
   startHint(session, active) {
     const w = this.state(session)
-    if (!w.loaded || session.busy || w.guide || w.cards.length || w.board.length || w.quiz.length
+    if (!w.loaded || session.busy || w.cards.length || w.board.length || w.quiz.length
       || session.messages.length || session.source || session.draft.trim()) return null
     if (String(session.paper.getField('abstractNote') || '').trim()) {
       return { action: 'abstract', text: '先点「读摘要」，了解研究问题和主要结论。' }
@@ -126,7 +135,7 @@ var PaperMindWorkspace = {
             || (data.quiz && !texts(data.quiz)) || (data.guide && typeof data.guide.content !== 'string')) throw new Error('阅读记录格式无法识别，未覆盖原文件。')
           w.cards = data.cards; w.board = data.board
           session.messages = data.messages
-          w.guide = data.guide || null
+          this.foldGuide(session, data.guide); w.guide = null
           w.quiz = Array.isArray(data.quiz) ? data.quiz : []
           w.boardExport = data.boardExport || null
           session.draft = String(data.draft || '')
@@ -176,7 +185,7 @@ var PaperMindWorkspace = {
       await this.persist(session)
       if (!message) void this.translateCard(session, card)
     }
-    w.mode = 'read'; session.status = '已存为本篇卡片。'; this.sidebar.refresh(session)
+    session.status = '已存为卡片，可在「卡片」中查看。'; this.sidebar.refresh(session)
   },
 
   backup(session) {
@@ -197,7 +206,7 @@ var PaperMindWorkspace = {
     const clean = value => {
       if (!value || typeof value.content !== 'string' || value.content.length > 200000) throw new Error('阅读备份中的文字记录无效。')
       const next = { content: value.content }
-      for (const key of ['id', 'question', 'display', 'coverage', 'origin', 'section', 'createdAt', 'translation']) if (typeof value[key] === 'string') next[key] = value[key].slice(0, 10000)
+      for (const key of ['id', 'question', 'display', 'coverage', 'origin', 'section', 'createdAt', 'translation', 'kind']) if (typeof value[key] === 'string') next[key] = value[key].slice(0, 10000)
       if (['user', 'assistant'].includes(value.role)) next.role = value.role
       const source = value.source
       if (source && typeof source.text === 'string' && /^[A-Z0-9]{8}$/.test(source.attachmentKey || '')) {
@@ -222,8 +231,9 @@ var PaperMindWorkspace = {
     // Keep the previous state even when the user restores the wrong revision.
     if (await IOUtils.exists(path)) await IOUtils.copy(path, path + '.before-restore-' + Date.now() + '.json', { noOverwrite: true })
     await IOUtils.writeJSON(path, data, { tmpPath: path + '.tmp', mode: 'overwrite', permissions: 0o600 })
-    Object.assign(w, { cards: data.cards, board: data.board, guide: data.guide, quiz: data.quiz, boardExport: null, storageError: '' })
+    Object.assign(w, { cards: data.cards, board: data.board, guide: null, quiz: data.quiz, boardExport: null, storageError: '' })
     session.messages = data.messages; session.draft = data.draft
+    this.foldGuide(session, data.guide)
     this.sidebar.refresh(session)
   },
 
@@ -304,18 +314,18 @@ var PaperMindWorkspace = {
       if (action === 'abstract' && !paper.abstract.trim()) throw new Error('条目没有摘要，可使用阅读路线或读当前页。')
       timer = win.setTimeout(() => controller.abort(), 90000)
       const context = action === 'abstract' ? { page: null, currentText: '', pages: '', coverage: '依据条目摘要' }
-        : await PaperMindReaderContext.collect(activeSnapshot, prompt + ' ' + (source?.text || ''), controller.signal)
+        : await PaperMindReaderContext.collect(activeSnapshot, prompt + ' ' + (source?.text || ''), controller.signal, { allowWhole: !w.partialContext })
       if (!current()) return
       if (action === 'page' && !context.currentText.trim()) throw new Error('当前页没有可读取的文字层。仍可划选可用文字，或读摘要。')
       if (!paper.abstract && !context.currentText && !context.pages.replace(/^\[读取范围[^\n]*\]\n?/, '').trim() && !source?.text) throw new Error('尚未读到论文文字，请等待 PDF 加载后重试。')
       const instructions = {
-        // Each reading task states its own length; without it models expand into long reviews.
-        map: '为这篇论文制定阅读路线。先用一句话说明文献类型和研究问题，再列最多5步，每步一句：先读哪一部分、核对什么证据或数字，并标页码。依据给出的页码内容，不预设文章一定是临床试验。不写标题和总结。',
+        // Readers want depth without filler: tasks ask for concrete content, not a word count.
+        map: '为这篇论文制定阅读路线：先说明文献类型和研究问题，再给出阅读顺序，每一步说清先读哪一部分、在那里要弄明白什么具体问题（变量、设计、关键数字），以及读懂的标准。依据全文实际内容，不预设文章一定是临床试验。',
         abstract: '带读这篇论文的摘要。',
-        page: '带读当前页，用约250—350字（含标点）。第一句用大白话说这页在讲什么；再讲最多3个要点，每点1—2句，标页码。术语第一次出现时顺带用一句话解释；出现数字时说清它代表什么。只讲本页内容，其他页仅用于帮助理解，不把本页没有的信息当成已知。不写标题，不逐句复述原文，不写总结段。',
-        guide: '精读选中的这段原文，用约200—300字（含标点）。先用一两句大白话说这段在讲什么，再解释关键术语，最后说明它在全文论证中起什么作用。区分作者陈述与推断，保留原文限定词。不写标题，不逐句复述原文。',
-        quiz: '基于给出的本文原文与阅读卡片，提出一个需要理解而非背诵的问题。一次只问一题，先不要给答案。附可回看的 PDF 页码。',
-        quizAnswer: '核对我对上一题的回答，指出哪些有原文支持、哪些需要修正，并给出原文页码。不要根据原文没有的信息评分。我的回答：' + prompt,
+        page: `带读当前页（PDF 第 ${context.page} 页）。先说这一页在全文里承担什么任务，再按内容块讲清：作者在这里做了什么、给了哪些具体信息（变量、量表、样本、数字、统计方法），这些信息意味着什么，读者要抓住什么。术语第一次出现时用一句大白话解释，并落回本文的具体用法。只讲这一页的内容，其他页用于帮助理解。不逐句复述原文，不写空泛总结。`,
+        guide: '精读选中的这段原文：先说这段的主干意思，再拆开讲其中关键的术语、变量、统计表达或数字在本文中的具体含义，最后说明这段在全文论证中起什么作用、和哪些部分相呼应。区分作者陈述与推断。不逐句复述原文。',
+        quiz: '基于给出的本文原文与阅读卡片，提出一个需要理解而非背诵的问题。一次只问一题，先不要给答案。',
+        quizAnswer: '核对我对上一题的回答，指出哪些有原文支持、哪些需要修正，修正时说明原文具体怎么写的。不要根据原文没有的信息评分。我的回答：' + prompt,
       }
       const history = action === 'quizAnswer' ? w.quiz : action === 'chat' ? session.messages : []
       const userMessage = (instructions[action] || prompt).slice(0, 2000)
@@ -325,11 +335,11 @@ var PaperMindWorkspace = {
         paper_rowid: 0, message: userMessage,
         history: history.slice(-8).map(({ role, content }) => ({ role, content: content.slice(0, 8000) })),
         current_page: context.page, current_page_text: context.currentText,
-        paper_pages: (context.pages + (cards ? '\n[个人阅读卡片，可能含推断，需回原文核对]\n' + cards : '')).slice(0, 24000),
+        paper_pages: (context.pages + (cards ? '\n[个人阅读卡片，可能含推断，需回原文核对]\n' + cards : '')).slice(0, this.contextLimit),
         quote: source ? { text: source.text.slice(0, 4000), page: source.page } : null }
       const question = ({ map: '阅读路线', abstract: '摘要带读', page: `第 ${context.page} 页带读`, guide: '精读这段', quiz: '考考自己', quizAnswer: '核对回答' })[action] || prompt
       // Show the answer as it arrives; only the finished answer is saved.
-      const target = action.startsWith('quiz') ? 'quiz' : action === 'chat' ? 'chat' : 'read'
+      const target = action.startsWith('quiz') ? 'quiz' : 'read'
       w.mode = target; w.streaming = { request, mode: target, question, prompt: action === 'chat' ? prompt : '', text: '' }
       session.status = '正在生成…'; w.coverage = context.coverage; this.sidebar.refresh(session)
       const onDelta = text => {
@@ -339,7 +349,19 @@ var PaperMindWorkspace = {
         win.clearTimeout(timer); timer = win.setTimeout(() => controller.abort(), 90000)
         if (!w.streamTimer) w.streamTimer = win.setTimeout(() => { w.streamTimer = null; this.sidebar.refresh(session) }, 100)
       }
-      const data = await PaperMind.ai.request(win, '/api/chat', payload, controller.signal, onDelta)
+      let data
+      try { data = await PaperMind.ai.request(win, '/api/chat', payload, controller.signal, onDelta) }
+      catch (error) {
+        if (error.code !== 'CONTEXT_TOO_LONG' || w.partialContext || action === 'abstract') throw error
+        // The model cannot take the whole paper: retry once with selected pages and
+        // remember it for this paper, so later questions do not fail first.
+        const smaller = await PaperMindReaderContext.collect(activeSnapshot, prompt + ' ' + (source?.text || ''), controller.signal, { allowWhole: false })
+        if (!current()) return
+        payload.paper_pages = (smaller.pages + (cards ? '\n[个人阅读卡片，可能含推断，需回原文核对]\n' + cards : '')).slice(0, this.contextLimit)
+        w.coverage = smaller.coverage; context.coverage = smaller.coverage
+        data = await PaperMind.ai.request(win, '/api/chat', payload, controller.signal, onDelta)
+        if (current() && data.ok && data.reply) w.partialContext = true
+      }
       if (!current()) return
       if (!data.ok || !data.reply) throw new Error(data.error || data.reply || '没有收到内容，请重试。')
       const pageSource = activeSnapshot && context.page ? { text: context.currentText, page: context.page,
@@ -352,9 +374,11 @@ var PaperMindWorkspace = {
         if (w.quizDraft.trim() === prompt) w.quizDraft = ''
       } else if (action === 'chat') {
         session.messages.push({ role: 'user', content: prompt + (source ? '\n所选原文：' + source.text : ''), display: prompt }, result)
-        w.mode = 'chat'
         if (session.draft.trim() === prompt) session.draft = ''
-      } else { w.guide = result; w.mode = 'read' }
+      } else {
+        // Reading results join the same timeline, so follow-up questions see them as history.
+        session.messages.push({ role: 'user', content: question, display: question, kind: 'read' }, { ...result, kind: 'read' })
+      }
       session.status = ''; await this.persist(session)
     } catch (error) {
       if (request === session.request) session.error = controller.signal.aborted ? '已停止或等待超时，可重试。' : error.message
@@ -445,12 +469,13 @@ var PaperMindWorkspace = {
     const mode = name => { w.mode = name; sidebar.refresh(session) }
     const tabs = el('nav', null, head, 'pmw-tabs')
     tabs.setAttribute('aria-label', '阅读台分区')
-    for (const [label, name] of [['阅读', 'read'], ['对话', 'chat'], ['自测', 'quiz'], [`汇报 · ${w.board.length}`, 'board']]) {
+    for (const [label, name] of [['阅读', 'read'], [`卡片 · ${w.cards.length}`, 'cards'], ['自测', 'quiz'], [`汇报 · ${w.board.length}`, 'board']]) {
       const tab = button(tabs, label, () => mode(name))
       if (w.mode === name) tab.setAttribute('aria-current', 'page')
     }
     const content = el('main', null, root, 'pmw-scroll')
     const busy = session.busy || !w.loaded
+    const hint = w.mode === 'read' ? this.startHint(session, active) : null
     // Page link sits in the card head so the action row stays on one line.
     const sourceLink = (parent, source) => {
       const link = button(parent, `第 ${source.page || '?'} 页 ↗`, () => sidebar.openSource(source, session))
@@ -466,7 +491,7 @@ var PaperMindWorkspace = {
     const streamCard = parent => {
       const card = el('article', null, parent, 'pmw-card')
       card.setAttribute('aria-busy', 'true')
-      resultHead(card, live.mode === 'chat' ? '研雀' : live.question, null, live.mode !== 'chat')
+      resultHead(card, live.prompt ? '研雀' : live.question, null, !live.prompt)
       if (live.text) sidebar.renderAnswer(el('div', null, card, 'pmw-text'), live.text)
       el('div', live.text ? '生成中…' : '正在等待回答…', card, 'pmw-muted')
     }
@@ -553,7 +578,7 @@ var PaperMindWorkspace = {
       for (const message of w.quiz) {
         if (message.role === 'user') continue
         const box = el('article', null, content, 'pmw-card')
-        resultHead(box, '研雀', message.source)
+        resultHead(box, '研雀', null)
         sidebar.renderAnswer(el('div', null, box, 'pmw-text'), message.content)
         actions(box, message)
       }
@@ -565,43 +590,9 @@ var PaperMindWorkspace = {
         answer.setAttribute('aria-label', '自测回答'); answer.dataset.input = 'quiz'
         answer.addEventListener('input', () => { w.quizDraft = answer.value })
         button(content, '核对回答', () => this.run(session, 'quizAnswer', win), busy)
-        button(content, '带入对话', () => { session.draft = `关于自测：${w.quiz.filter(x => x.role === 'assistant').at(-1)?.content || ''}\n我的疑问：`.slice(0, 1500); mode('chat') })
+        button(content, '带入追问', () => { session.draft = `关于自测：${w.quiz.filter(x => x.role === 'assistant').at(-1)?.content || ''}\n我的疑问：`.slice(0, 1500); mode('read') })
       }
-    } else if (w.mode === 'chat') {
-      el('h3', '关于这篇的对话', content)
-      if (!session.messages.length) el('p', '结合当前页、选段与论文背景继续问。', content, 'pmw-muted')
-      for (const message of session.messages) {
-        const box = el('article', null, content, 'pmw-card' + (message.role === 'user' ? ' pmw-ask' : ''))
-        resultHead(box, message.role === 'user' ? '提问' : '研雀', message.role === 'assistant' ? message.source : null)
-        sidebar.renderAnswer(el('div', null, box, 'pmw-text'), message.display || message.content)
-        if (message.role === 'assistant') actions(box, message)
-      }
-      if (live) {
-        if (live.prompt) {
-          const ask = el('article', null, content, 'pmw-card pmw-ask')
-          resultHead(ask, '提问', null)
-          sidebar.renderAnswer(el('div', null, ask, 'pmw-text'), live.prompt)
-        }
-        streamCard(content)
-      }
-    } else {
-      const hint = this.startHint(session, active)
-      if (hint) el('p', hint.text, content, 'pmw-start').setAttribute('aria-label', '阅读起步提示')
-      const controls = el('div', null, content, 'pmw-actions')
-      for (const [label, action] of [['阅读路线', 'map'], ['读摘要', 'abstract'], ['读当前页', 'page']]) {
-        const control = button(controls, label, () => this.run(session, action, win), busy)
-        if (hint?.action === action) control.className = 'pmw-start-action'
-      }
-      if (live) streamCard(content)
-      else if (w.guide) {
-        const guide = el('article', null, content, 'pmw-card')
-        resultHead(guide, w.guide.question, w.guide.source, true)
-        sidebar.renderAnswer(el('div', null, guide, 'pmw-text'), w.guide.content)
-        const row = actions(guide, w.guide)
-        button(row, '继续追问', () => { session.draft = `关于${w.guide.question}：`; session.messages.push({ role: 'user', content: w.guide.question }, { ...w.guide }); mode('chat') })
-        button(row, '收起', () => { w.guide = null; void this.persist(session) }).classList.add('pmw-end')
-      } else el('p', hint ? '阅读路线：先读哪些部分、核对哪些证据。读当前页：解释当前页文字。'
-        : '先抓整篇思路，或跟着当前页读。划选原文可直接精读、翻译或存卡片。', content, 'pmw-muted')
+    } else if (w.mode === 'cards') {
       const cardHead = el('div', null, content, 'pmw-row')
       el('h3', `阅读卡片 · ${w.cards.length}`, cardHead)
       button(cardHead, '写卡片', () => startEdit('new'), !w.loaded || w.editing === 'new')
@@ -624,8 +615,34 @@ var PaperMindWorkspace = {
         }, !editable || Boolean(card.noteID || card.saving))
         toBoardMenu(row, card)
       }
+    } else {
+      // One timeline: reading results and questions in the order they happened.
+      if (hint) el('p', hint.text, content, 'pmw-start').setAttribute('aria-label', '阅读起步提示')
+      else if (!session.messages.length && !live) el('p', '先抓整篇思路，或跟着当前页读。划选原文可精读或存卡片；有疑问在下方直接问。', content, 'pmw-muted')
+      for (const message of session.messages) {
+        if (message.role === 'user' && message.kind === 'read') continue
+        const box = el('article', null, content, 'pmw-card' + (message.role === 'user' ? ' pmw-ask' : ''))
+        const reading = message.role === 'assistant' && message.kind === 'read'
+        // Answers carry no page link: the page the reader stood on is not where the answer's content lies.
+        resultHead(box, message.role === 'user' ? '提问' : reading ? message.question : '研雀', null, reading)
+        sidebar.renderAnswer(el('div', null, box, 'pmw-text'), message.display || message.content)
+        if (message.role === 'assistant') actions(box, message)
+      }
+      if (live) {
+        if (live.prompt) {
+          const ask = el('article', null, content, 'pmw-card pmw-ask')
+          resultHead(ask, '提问', null)
+          sidebar.renderAnswer(el('div', null, ask, 'pmw-text'), live.prompt)
+        }
+        streamCard(content)
+      }
     }
     const footer = el('footer', null, root)
+    const controls = el('div', null, footer, 'pmw-actions')
+    for (const [label, action] of [['阅读路线', 'map'], ['读摘要', 'abstract'], ['读当前页', 'page']]) {
+      const control = button(controls, label, () => this.run(session, action, win), busy)
+      if (hint?.action === action) control.className = 'pmw-start-action'
+    }
     if (session.source) {
       const selected = el('details', null, footer, 'pmw-source')
       selected.open = Boolean(w.sourceOpen)
@@ -636,7 +653,7 @@ var PaperMindWorkspace = {
       button(selected, '清除选段', () => { session.source = null; sidebar.refresh(session) })
     }
     const input = el('textarea', null, footer)
-    input.value = session.draft; input.maxLength = 1800; input.placeholder = '针对这篇，继续问…'
+    input.value = session.draft; input.maxLength = 1800; input.placeholder = '针对这篇，继续问…（可用系统听写口述）'
     input.disabled = !w.loaded
     input.setAttribute('aria-label', '继续追问'); input.dataset.input = 'chat'
     input.addEventListener('input', () => { session.draft = input.value })
@@ -657,8 +674,14 @@ var PaperMindWorkspace = {
       status.setAttribute('role', error ? 'alert' : 'status')
       if (w.storageError) button(status, '重试本地记录', () => w.loaded ? this.persist(session) : this.load(session))
     }
-    content.scrollTop = live && nearBottom ? content.scrollHeight : scrollTop
+    // The timeline opens at its newest entry and follows a new request; a reader
+    // who scrolled up to an earlier entry is not pulled back when it finishes.
+    const switched = w.shownMode !== w.mode, started = Boolean(live) && !w.shownLive
+    w.shownMode = w.mode; w.shownLive = Boolean(live)
+    content.scrollTop = w.mode === 'read' && (switched || started || nearBottom) || live && nearBottom
+      ? content.scrollHeight : switched ? 0 : scrollTop
     if (focusName) { const target = root.querySelector(`[data-input="${focusName}"]`); if (target) { target.focus(); target.setSelectionRange(...selection) } }
+    else if (w.focusAsk) { w.focusAsk = false; input.focus() }
   },
 
   // Editing happens inside the card; a multi-paragraph card cannot fit a one-line prompt.
