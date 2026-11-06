@@ -14,8 +14,8 @@
 
 ## 已验证
 
-macOS / Zotero 10.0.6 本机安装并日常使用通过。单元测试 128 项与阅读台、侧栏、AI 设置三组浏览器回归通过，覆盖时间线顺序与追问历史、旧记录并入、整篇发送与挑页回退、错误识别、存为批注。时间线、回答质量与网页入口相关改动经独立复查，发现的问题已修复并复验。
+macOS / Zotero 10.0.6 本机安装并日常使用通过。单元测试 133 项与阅读台、侧栏、AI 设置三组浏览器回归通过，覆盖时间线顺序与追问历史、旧记录并入、整篇发送与挑页回退、错误识别、存为批注。本版改动经独立复查，发现的问题已修复并复验。
 
-回答效果随所选服务和模型变化；Windows/Linux 原生使用尚未验证。
+回答效果随所选服务和模型变化；Windows/Linux 原生使用尚未验证。已知限制：页边距不足约 26pt 的 PDF 上便签可能与正文重叠；同一行存两段译文时两个便签图标重合（批注栏中两条都可见）。
 
 [安装与连接](https://github.com/lvyrana/papermind-zotero#安装) · [隐私说明](https://github.com/lvyrana/papermind-zotero/blob/main/PRIVACY.md) · [历史版本](https://github.com/lvyrana/papermind-zotero/releases)
