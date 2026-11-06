@@ -318,9 +318,10 @@ var PaperMindSidebar = {
     }
   },
 
-  // A sticky-note annotation beside the paragraph's first line, placed in screen
-  // terms so rotated pages behave: left margin normally, right margin for a right
-  // column or a paragraph with no room on its left. The translation lives in its
+  // A sticky-note annotation in the page's outer margin, level with the paragraph's
+  // first line. A selection's edge says nothing about where the text around it ends,
+  // so the note goes to the page edge on the selection's side instead of beside it.
+  // Worked out in screen terms so rotated pages behave. The translation lives in its
   // comment and no highlight is drawn on the text.
   translationNoteJSON(position, annotation, comment, viewport) {
     const rects = position?.rects
@@ -331,14 +332,21 @@ var PaperMindSidebar = {
       const a = toView(rect[0], rect[1]), b = toView(rect[2], rect[3])
       return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])]
     }
-    const scale = viewport?.scale || 1, size = 22 * scale, gap = 4 * scale, width = viewport?.width || Infinity
-    const first = box(rects[0]), end = Math.max(...rects.map(rect => box(rect)[2]))
-    const useLeft = first[0] - gap - size >= 0 && first[0] < width * 0.4
-    const x = Math.max(0, Math.min(useLeft ? first[0] - gap - size : end + gap, width - size)), top = first[1]
+    // Measured from the transform: viewport.scale leaves out the page's UserUnit.
+    const origin = toView(0, 0), unit = toView(1, 0), scale = Math.hypot(unit[0] - origin[0], unit[1] - origin[1])
+    const size = 22 * scale, inset = 4 * scale, first = box(rects[0])
+    let x = Math.max(0, first[0] - inset - size), top = first[1]
+    if (viewport?.width && viewport?.height) {
+      const start = Math.min(...rects.map(rect => box(rect)[0])), end = Math.max(...rects.map(rect => box(rect)[2]))
+      x = (start + end) / 2 < viewport.width / 2 ? inset : viewport.width - size - inset
+      top = Math.max(0, Math.min(top, viewport.height - size))
+    }
     const a = toPdf(x, top), b = toPdf(x + size, top + size)
+    // Zotero's sort index allows five digits for the vertical position.
+    const sortTop = Math.max(0, Math.min(99999, Math.round(viewport ? top / scale : 10000 + top)))
     return { key: Zotero.DataObjectUtilities.generateKey(), type: 'note', color: '#ffd400', comment,
       pageLabel: String(annotation?.pageLabel || position.pageIndex + 1),
-      sortIndex: annotation?.sortIndex || `${String(position.pageIndex).padStart(5, '0')}|000000|${String(viewport ? Math.max(0, Math.round(top / scale)) : 0).padStart(5, '0')}`,
+      sortIndex: annotation?.sortIndex || `${String(position.pageIndex).padStart(5, '0')}|000000|${String(sortTop).padStart(5, '0')}`,
       position: { pageIndex: position.pageIndex, rects: [[Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])]] } }
   },
 
@@ -469,8 +477,9 @@ var PaperMindSidebar = {
       keep.addEventListener('click', async () => {
         keep.disabled = true
         try {
-          await this.saveTranslationNote(source, annotation, position, translated,
-            view?._iframeWindow?.PDFViewerApplication?.pdfViewer?.getPageView?.(position?.pageIndex)?.viewport)
+          // Until a page loads, its view holds a clone of the first page's viewport.
+          const pageView = view?._iframeWindow?.PDFViewerApplication?.pdfViewer?.getPageView?.(position?.pageIndex)
+          await this.saveTranslationNote(source, annotation, position, translated, pageView?.pdfPage ? pageView.viewport : undefined)
           keep.textContent = '✓ 已存为批注'
         } catch (error) {
           keep.disabled = false
