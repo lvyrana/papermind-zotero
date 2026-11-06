@@ -302,23 +302,85 @@ test('read-only libraries never create notes', async () => {
   assert.match(f.session.error, /只读/)
 })
 
-test('a translation is kept as a margin sticky note without highlighting, once per paragraph', async () => {
+function noteFixture() {
   const f = fixture(), saved = []
   f.Zotero.DataObjectUtilities = { generateKey: () => 'ANNOTKEY' }
-  f.Zotero.Annotations = { saveFromJSON: async (parent, json) => { saved.push(json) } }
+  // Like Zotero's comment setter, stored comments are trimmed and normalized.
+  f.Zotero.Annotations = { saveFromJSON: async (parent, json) => { await null; saved.push({ ...json, comment: json.comment.trim().normalize() }) } }
   f.Zotero.Items.getByLibraryAndKey = () => f.attachment
   f.attachment.getAnnotations = () => saved.map(json => ({ annotationType: json.type, annotationComment: json.comment, annotationPosition: JSON.stringify(json.position) }))
-  const source = { libraryID: 1, attachmentKey: 'PDF12345' }, position = { pageIndex: 3, rects: [[10, 700, 300, 712], [10, 680, 300, 692]] }
-  await f.sidebar.saveTranslationNote(source, { pageLabel: '4' }, position, '中文译文')
-  await f.sidebar.saveTranslationNote(source, { pageLabel: '4' }, position, '中文译文')
-  assert.equal(saved.length, 1)
-  assert.equal(saved[0].type, 'note')
-  assert.equal(saved[0].comment, '中文译文')
-  assert.equal(saved[0].text, undefined)
-  assert.deepEqual(JSON.parse(JSON.stringify(saved[0].position)), { pageIndex: 3, rects: [[0, 690, 22, 712]] })
-  assert.equal(saved[0].sortIndex, '00003|000000|00000')
-  await assert.rejects(f.sidebar.saveTranslationNote(source, {}, { pageIndex: 3 }, '另一段'), /位置/)
-  f.Zotero.Libraries.get = () => ({ editable: false })
-  await assert.rejects(f.sidebar.saveTranslationNote(source, {}, position, '另一段'), /只读/)
-  assert.equal(saved.length, 1)
+  return { ...f, saved, source: { libraryID: 1, attachmentKey: 'PDF12345' } }
+}
+// pdf.js PageViewport for a 600×800 page at scale 2, rotated clockwise.
+const viewportFor = rotation => {
+  const scale = 2, w = 600, h = 800
+  const point = {
+    0: (x, y) => [x, h - y], 90: (x, y) => [y, x], 180: (x, y) => [w - x, y], 270: (x, y) => [h - y, w - x],
+  }[rotation], inverse = {
+    0: (x, y) => [x, h - y], 90: (x, y) => [y, x], 180: (x, y) => [w - x, y], 270: (x, y) => [w - y, h - x],
+  }[rotation]
+  return { scale, width: (rotation % 180 ? h : w) * scale, height: (rotation % 180 ? w : h) * scale,
+    convertToViewportPoint: (x, y) => point(x, y).map(v => v * scale), convertToPdfPoint: (x, y) => inverse(x / scale, y / scale) }
+}
+const plain = value => JSON.parse(JSON.stringify(value))
+
+test('a translation is kept as a sticky note without highlighting, once per paragraph', async () => {
+  const f = noteFixture(), position = { pageIndex: 3, rects: [[80, 700, 300, 712], [80, 680, 300, 692]] }
+  await f.sidebar.saveTranslationNote(f.source, { pageLabel: '4' }, position, '中文译文\n')
+  await f.sidebar.saveTranslationNote(f.source, { pageLabel: '4' }, position, '中文译文')
+  assert.equal(f.saved.length, 1)
+  assert.equal(f.saved[0].type, 'note')
+  assert.equal(f.saved[0].comment, '中文译文')
+  assert.equal(f.saved[0].text, undefined)
+  assert.deepEqual(plain(f.saved[0].position), { pageIndex: 3, rects: [[54, 690, 76, 712]] })
+  assert.equal(f.saved[0].sortIndex, '00003|000000|00000')
+  await assert.rejects(f.sidebar.saveTranslationNote(f.source, {}, { pageIndex: 3 }, '另一段'), /位置/)
+})
+
+test('two reader tabs saving the same translation at once create one note', async () => {
+  const f = noteFixture(), position = { pageIndex: 1, rects: [[80, 700, 300, 712]] }
+  await Promise.all([f.sidebar.saveTranslationNote(f.source, {}, position, '译文'), f.sidebar.saveTranslationNote(f.source, {}, position, '译文')])
+  assert.equal(f.saved.length, 1)
+})
+
+test('sticky notes never cover text: right column and tight margins use the right side', () => {
+  const f = fixture(), viewport = viewportFor(0)
+  f.Zotero.DataObjectUtilities = { generateKey: () => 'K' }
+  const rectFor = rects => plain(f.sidebar.translationNoteJSON({ pageIndex: 0, rects }, {}, 'x', viewport).position.rects[0])
+  // Left column: in the left margin, top aligned with the first line.
+  assert.deepEqual(rectFor([[60, 700, 290, 712], [60, 680, 290, 692]]), [34, 690, 56, 712])
+  // Right column: the gutter is too narrow, so it goes in the right margin.
+  assert.deepEqual(rectFor([[310, 700, 540, 712], [310, 680, 550, 692]]), [554, 690, 576, 712])
+  // No room on the left of a full-width line.
+  assert.deepEqual(rectFor([[10, 700, 300, 712]]), [304, 690, 326, 712])
+  // Never off the page.
+  assert.deepEqual(rectFor([[310, 700, 595, 712]]), [578, 690, 600, 712])
+})
+
+test('on rotated pages the sticky note stays on the screen-left of the first line', () => {
+  const f = fixture(), rect = [100, 500, 300, 512]
+  f.Zotero.DataObjectUtilities = { generateKey: () => 'K' }
+  for (const rotation of [0, 90, 180, 270]) {
+    const viewport = viewportFor(rotation)
+    const box = r => { const a = viewport.convertToViewportPoint(r[0], r[1]), b = viewport.convertToViewportPoint(r[2], r[3]); return { left: Math.min(a[0], b[0]), right: Math.max(a[0], b[0]), top: Math.min(a[1], b[1]) } }
+    const note = box(f.sidebar.translationNoteJSON({ pageIndex: 0, rects: [rect] }, {}, 'x', viewport).position.rects[0])
+    const text = box(rect)
+    if (text.left < viewport.width * 0.4) assert.ok(note.right <= text.left, `rotation ${rotation}: left of the text`)
+    else assert.ok(note.left >= text.right, `rotation ${rotation}: right of the text`)
+    assert.ok(Math.abs(note.top - text.top) < 1e-6, `rotation ${rotation}: aligned with the first line`)
+  }
+})
+
+test('deleted, read-only and non-editable attachments are refused before saving', async () => {
+  const position = { pageIndex: 1, rects: [[80, 700, 300, 712]] }
+  for (const [prepare, pattern] of [
+    [f => { f.attachment.deleted = true }, /已删除/],
+    [f => { f.attachment.parentItem = { deleted: true } }, /已删除/],
+    [f => { f.attachment.isEditable = () => false }, /只读/],
+    [f => { f.Zotero.Libraries.get = () => ({ editable: false }) }, /只读/],
+  ]) {
+    const f = noteFixture(); prepare(f)
+    await assert.rejects(f.sidebar.saveTranslationNote(f.source, {}, position, '译文'), pattern)
+    assert.equal(f.saved.length, 0)
+  }
 })

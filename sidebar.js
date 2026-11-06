@@ -318,28 +318,47 @@ var PaperMindSidebar = {
     }
   },
 
-  // A sticky-note annotation in the margin beside the paragraph's first line:
-  // the translation lives in its comment and no highlight is drawn on the text.
-  translationNoteJSON(position, annotation, comment) {
-    const rect = position?.rects?.[0]
-    if (!Number.isInteger(position?.pageIndex) || !Array.isArray(rect) || rect.length < 4) return null
-    const size = 22, x = Math.max(0, rect[0] - size - 4), top = rect[3]
+  // A sticky-note annotation beside the paragraph's first line, placed in screen
+  // terms so rotated pages behave: left margin normally, right margin for a right
+  // column or a paragraph with no room on its left. The translation lives in its
+  // comment and no highlight is drawn on the text.
+  translationNoteJSON(position, annotation, comment, viewport) {
+    const rects = position?.rects
+    if (!Number.isInteger(position?.pageIndex) || !Array.isArray(rects?.[0]) || rects[0].length < 4) return null
+    const toView = viewport?.convertToViewportPoint ? (x, y) => viewport.convertToViewportPoint(x, y) : (x, y) => [x, -y]
+    const toPdf = viewport?.convertToPdfPoint ? (x, y) => viewport.convertToPdfPoint(x, y) : (x, y) => [x, -y]
+    const box = rect => {
+      const a = toView(rect[0], rect[1]), b = toView(rect[2], rect[3])
+      return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])]
+    }
+    const scale = viewport?.scale || 1, size = 22 * scale, gap = 4 * scale, width = viewport?.width || Infinity
+    const first = box(rects[0]), end = Math.max(...rects.map(rect => box(rect)[2]))
+    const useLeft = first[0] - gap - size >= 0 && first[0] < width * 0.4
+    const x = Math.max(0, Math.min(useLeft ? first[0] - gap - size : end + gap, width - size)), top = first[1]
+    const a = toPdf(x, top), b = toPdf(x + size, top + size)
     return { key: Zotero.DataObjectUtilities.generateKey(), type: 'note', color: '#ffd400', comment,
       pageLabel: String(annotation?.pageLabel || position.pageIndex + 1),
-      sortIndex: annotation?.sortIndex || `${String(position.pageIndex).padStart(5, '0')}|000000|00000`,
-      position: { pageIndex: position.pageIndex, rects: [[x, top - size, x + size, top]] } }
+      sortIndex: annotation?.sortIndex || `${String(position.pageIndex).padStart(5, '0')}|000000|${String(viewport ? Math.max(0, Math.round(top / scale)) : 0).padStart(5, '0')}`,
+      position: { pageIndex: position.pageIndex, rects: [[Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])]] } }
   },
 
-  async saveTranslationNote(source, annotation, position, comment) {
-    const attachment = Zotero.Items.getByLibraryAndKey(source.libraryID, source.attachmentKey)
-    if (!attachment?.isAttachment?.()) throw new Error('原文附件不可用。')
-    if (!Zotero.Libraries.get(attachment.libraryID)?.editable) throw new Error('这个文库是只读的。')
-    const json = this.translationNoteJSON(position, annotation, comment)
-    if (!json) throw new Error('无法确定这段原文在页面上的位置。')
-    // Saving the same paragraph twice keeps one note.
-    const same = attachment.getAnnotations().some(item => item.annotationType === 'note' && item.annotationComment === comment
-      && JSON.parse(item.annotationPosition || '{}').pageIndex === position.pageIndex)
-    if (!same) await Zotero.Annotations.saveFromJSON(attachment, json)
+  // Saves run one at a time, so two reader tabs cannot both pass the duplicate check.
+  saveTranslationNote(source, annotation, position, comment, viewport) {
+    const task = (this.noteSaves || Promise.resolve()).catch(() => {}).then(async () => {
+      const attachment = Zotero.Items.getByLibraryAndKey(source.libraryID, source.attachmentKey)
+      if (!attachment?.isAttachment?.()) throw new Error('原文附件不可用。')
+      if (attachment.deleted || attachment.parentItem?.deleted) throw new Error('原文附件已删除。')
+      if (!Zotero.Libraries.get(attachment.libraryID)?.editable || attachment.isEditable?.() === false) throw new Error('这个文库或附件是只读的。')
+      // Zotero stores comments trimmed and normalized; compare the same form.
+      const text = String(comment).trim().normalize()
+      const json = this.translationNoteJSON(position, annotation, text, viewport)
+      if (!json) throw new Error('无法确定这段原文在页面上的位置。')
+      const same = attachment.getAnnotations().some(item => item.annotationType === 'note' && item.annotationComment === text
+        && JSON.parse(item.annotationPosition || '{}').pageIndex === position.pageIndex)
+      if (!same) await Zotero.Annotations.saveFromJSON(attachment, json)
+    })
+    this.noteSaves = task
+    return task
   },
 
   async translateInline({ reader, doc, annotation, source, bar }) {
@@ -450,7 +469,8 @@ var PaperMindSidebar = {
       keep.addEventListener('click', async () => {
         keep.disabled = true
         try {
-          await this.saveTranslationNote(source, annotation, position, translated)
+          await this.saveTranslationNote(source, annotation, position, translated,
+            view?._iframeWindow?.PDFViewerApplication?.pdfViewer?.getPageView?.(position?.pageIndex)?.viewport)
           keep.textContent = '✓ 已存为批注'
         } catch (error) {
           keep.disabled = false
