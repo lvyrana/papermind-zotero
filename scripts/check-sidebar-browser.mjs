@@ -20,7 +20,8 @@ try {
       isRegularItem: () => true, getCreators: () => [],
       getField: field => ({ title: '示例论文：运动干预与活动能力', abstractNote: 'An example study with uncertain estimates.' }[field] || '') }
     const attachment = window.__attachment = { id: 2, key: 'PDF12345', libraryID: 1,
-      isAttachment: () => true, parentItemID: 1 }
+      isAttachment: () => true, parentItemID: 1, getAnnotations: () => window.__annotations.map(json => ({ annotationType: json.type, annotationComment: json.comment, annotationPosition: JSON.stringify(json.position) })) }
+    window.__annotations = []; window.__copied = []
     const prefs = new Map([
       ['extensions.papermind.uid', '123e4567-e89b-42d3-a456-426614174000'],
       ['extensions.papermind.configVersion', 3],
@@ -32,6 +33,8 @@ try {
       Items: { get: id => id === 1 ? paper : attachment,
         getByLibraryAndKey: () => attachment },
       Libraries: { get: () => ({ libraryType: 'user', editable: true }) },
+      Annotations: { saveFromJSON: async (parent, json) => { window.__annotations.push({ parent: parent.id, ...json }) } },
+      DataObjectUtilities: { generateKey: () => 'ANNOTKEY' }, Utilities: { Internal: { copyTextToClipboard: text => window.__copied.push(text) } },
       getMainWindow: () => window, getMainWindows: () => [window],
       Reader: { getByTabID: () => ({ itemID: 2 }), open: async (id, location) => { window.__lastReaderOpen = { id, location } } },
       Item: class {
@@ -51,7 +54,7 @@ try {
   await page.evaluate(() => {
     PaperMindSidebar.addToWindow(window)
     PaperMindSidebar.selectionPopup({ reader: { itemID: 2 }, doc: document,
-      params: { annotation: { text: 'The observed effect was uncertain.', position: { pageIndex: 2 } } },
+      params: { annotation: { text: 'The observed effect was uncertain.', pageLabel: '3', sortIndex: '00002|000120|00300', position: { pageIndex: 2, rects: [[100, 500, 300, 512]] } } },
       append: node => document.getElementById('selection').appendChild(node) })
   })
   await page.getByRole('button', { name: '研雀阅读台', exact: true }).click()
@@ -84,6 +87,16 @@ try {
     top: document.querySelector('[aria-label="研雀原文下方翻译"]').getBoundingClientRect().top,
   }))
   assert.ok(inlineBounds.top >= inlineBounds.bottom)
+  // The translation can be copied, or kept as a sticky-note annotation with no highlight drawn.
+  await page.getByRole('button', { name: '复制', exact: true }).click()
+  assert.deepEqual(await page.evaluate(() => window.__copied), ['观察到的效应存在不确定性。'])
+  await page.getByRole('button', { name: '存为批注', exact: true }).click()
+  await page.getByRole('button', { name: '✓ 已存为批注', exact: true }).waitFor()
+  const saved = await page.evaluate(() => window.__annotations)
+  assert.equal(saved.length, 1)
+  assert.deepEqual([saved[0].parent, saved[0].type, saved[0].comment, saved[0].pageLabel, saved[0].sortIndex],
+    [2, 'note', '观察到的效应存在不确定性。', '3', '00002|000120|00300'])
+  assert.deepEqual(saved[0].position, { pageIndex: 2, rects: [[74, 490, 96, 512]] })
   await page.getByRole('button', { name: '关闭', exact: true }).click()
   assert.equal(await page.locator('[aria-label="研雀原文下方翻译"]').count(), 0)
   await page.getByRole('button', { name: '研雀阅读台', exact: true }).click()
@@ -144,7 +157,7 @@ try {
   await assertPersonalTransport(page)
   assert.deepEqual(errors, [])
   console.log(JSON.stringify({ ok: true, mode: 'browser DOM with mocked Zotero and API',
-    checked: ['toolbar-toggle', 'selection-popup', 'explain', 'follow-up', 'save-note', 'page-link', 'clear-selection', 'provider-failure-retry', 'personal-ai-transport', 'long-chat-fixed-composer', 'paper-switch-draft', 'collapsed-source', 'settings-only-disclosure', 'safe-markdown', 'cleanup'],
+    checked: ['toolbar-toggle', 'selection-popup', 'translation-copy', 'translation-annotation', 'explain', 'follow-up', 'save-note', 'page-link', 'clear-selection', 'provider-failure-retry', 'personal-ai-transport', 'long-chat-fixed-composer', 'paper-switch-draft', 'collapsed-source', 'settings-only-disclosure', 'safe-markdown', 'cleanup'],
     nativeZotero: false }))
 } finally {
   await browser.close()

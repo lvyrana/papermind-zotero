@@ -293,7 +293,8 @@ var PaperMindSidebar = {
         if (action === 'card') void this.workspace.capture(session)
         else if (action) void this.run(session, action, win)
         else if (this.SHOW_WORKSPACE) {
-          this.workspace.state(session).mode = 'chat'
+          // Focus the question box so the reader can type or dictate right away.
+          Object.assign(this.workspace.state(session), { mode: 'read', focusAsk: true })
           this.refresh(session)
         }
       })
@@ -317,6 +318,57 @@ var PaperMindSidebar = {
     }
   },
 
+  // A sticky-note annotation in the page's outer margin, level with the paragraph's
+  // first line. A selection's edge says nothing about where the text around it ends,
+  // so the note goes to the page edge on the selection's side instead of beside it.
+  // Worked out in screen terms so rotated pages behave. The translation lives in its
+  // comment and no highlight is drawn on the text.
+  translationNoteJSON(position, annotation, comment, viewport) {
+    const rects = position?.rects
+    if (!Number.isInteger(position?.pageIndex) || !Array.isArray(rects?.[0]) || rects[0].length < 4) return null
+    const toView = viewport?.convertToViewportPoint ? (x, y) => viewport.convertToViewportPoint(x, y) : (x, y) => [x, -y]
+    const toPdf = viewport?.convertToPdfPoint ? (x, y) => viewport.convertToPdfPoint(x, y) : (x, y) => [x, -y]
+    const box = rect => {
+      const a = toView(rect[0], rect[1]), b = toView(rect[2], rect[3])
+      return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])]
+    }
+    // Measured from the transform: viewport.scale leaves out the page's UserUnit.
+    const origin = toView(0, 0), unit = toView(1, 0), scale = Math.hypot(unit[0] - origin[0], unit[1] - origin[1])
+    const size = 22 * scale, inset = 4 * scale, first = box(rects[0])
+    let x = Math.max(0, first[0] - inset - size), top = first[1]
+    if (viewport?.width && viewport?.height) {
+      const start = Math.min(...rects.map(rect => box(rect)[0])), end = Math.max(...rects.map(rect => box(rect)[2]))
+      x = (start + end) / 2 < viewport.width / 2 ? inset : viewport.width - size - inset
+      top = Math.max(0, Math.min(top, viewport.height - size))
+    }
+    const a = toPdf(x, top), b = toPdf(x + size, top + size)
+    // Zotero's sort index allows five digits for the vertical position.
+    const sortTop = Math.max(0, Math.min(99999, Math.round(viewport ? top / scale : 10000 + top)))
+    return { key: Zotero.DataObjectUtilities.generateKey(), type: 'note', color: '#ffd400', comment,
+      pageLabel: String(annotation?.pageLabel || position.pageIndex + 1),
+      sortIndex: annotation?.sortIndex || `${String(position.pageIndex).padStart(5, '0')}|000000|${String(sortTop).padStart(5, '0')}`,
+      position: { pageIndex: position.pageIndex, rects: [[Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])]] } }
+  },
+
+  // Saves run one at a time, so two reader tabs cannot both pass the duplicate check.
+  saveTranslationNote(source, annotation, position, comment, viewport) {
+    const task = (this.noteSaves || Promise.resolve()).catch(() => {}).then(async () => {
+      const attachment = Zotero.Items.getByLibraryAndKey(source.libraryID, source.attachmentKey)
+      if (!attachment?.isAttachment?.()) throw new Error('原文附件不可用。')
+      if (attachment.deleted || attachment.parentItem?.deleted) throw new Error('原文附件已删除。')
+      if (!Zotero.Libraries.get(attachment.libraryID)?.editable || attachment.isEditable?.() === false) throw new Error('这个文库或附件是只读的。')
+      // Zotero stores comments trimmed and normalized; compare the same form.
+      const text = String(comment).trim().normalize()
+      const json = this.translationNoteJSON(position, annotation, text, viewport)
+      if (!json) throw new Error('无法确定这段原文在页面上的位置。')
+      const same = attachment.getAnnotations().some(item => item.annotationType === 'note' && item.annotationComment === text
+        && JSON.parse(item.annotationPosition || '{}').pageIndex === position.pageIndex)
+      if (!same) await Zotero.Annotations.saveFromJSON(attachment, json)
+    })
+    this.noteSaves = task
+    return task
+  },
+
   async translateInline({ reader, doc, annotation, source, bar }) {
     this.translations.get(reader)?.close()
     const win = Zotero.getMainWindow()
@@ -335,10 +387,17 @@ var PaperMindSidebar = {
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12px;color:#64816e;margin-bottom:6px;'
     const title = doc.createElement('span')
     title.textContent = '研雀 · 翻译'
-    const close = doc.createElement('button')
-    close.textContent = '关闭'
-    close.style.cssText = 'font:inherit;color:inherit;background:transparent;border:0;cursor:pointer;padding:2px 6px;'
-    header.append(title, close)
+    const tool = text => {
+      const node = doc.createElement('button')
+      node.textContent = text
+      node.style.cssText = 'font:inherit;color:inherit;background:transparent;border:0;cursor:pointer;padding:2px 6px;'
+      return node
+    }
+    const close = tool('关闭'), copy = tool('复制'), keep = tool('存为批注')
+    copy.hidden = keep.hidden = true
+    const tools = doc.createElement('span')
+    tools.append(copy, keep, close)
+    header.append(title, tools)
     const result = doc.createElement('div')
     result.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;user-select:text;'
     result.textContent = '正在翻译…'
@@ -408,7 +467,25 @@ var PaperMindSidebar = {
       if (closed) return
       if (identity !== [PaperMind.getBaseURL(), PaperMind.getUid()].join('|')) { state.close(); return }
       if (!data.ok || !data.translated) throw new Error(data.error || '没有收到译文，请重试。')
-      result.textContent = String(data.translated)
+      const translated = String(data.translated)
+      result.textContent = translated
+      copy.hidden = keep.hidden = false
+      copy.addEventListener('click', () => {
+        Zotero.Utilities.Internal.copyTextToClipboard(translated)
+        copy.textContent = '✓ 已复制'
+      })
+      keep.addEventListener('click', async () => {
+        keep.disabled = true
+        try {
+          // Until a page loads, its view holds a clone of the first page's viewport.
+          const pageView = view?._iframeWindow?.PDFViewerApplication?.pdfViewer?.getPageView?.(position?.pageIndex)
+          await this.saveTranslationNote(source, annotation, position, translated, pageView?.pdfPage ? pageView.viewport : undefined)
+          keep.textContent = '✓ 已存为批注'
+        } catch (error) {
+          keep.disabled = false
+          result.textContent = translated + '\n\n未能存为批注：' + error.message
+        }
+      })
     } catch (error) {
       if (!closed) result.textContent = error.name === 'AbortError' ? '翻译超时，关闭后可重试。' : '翻译失败：' + error.message
     } finally {

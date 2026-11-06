@@ -126,6 +126,71 @@ test('unchanged account import uses its captured token and keeps credentials out
   assert.deepEqual(f.alerts, [])
 })
 
+test('on the official site the reading entry stays in Zotero while the web entry uploads and opens the website', async () => {
+  const f = fixture(), site = 'https://papermindapp.com'
+  let focused = 0
+  f.prefs.set(f.pm.PREF_BASE, site)
+  f.pm.sidebar = { focusPane: () => focused++ }
+  f.pm.account = { record: () => ({ token: 'synthetic-account-session', account: { data_uid: UID } }) }
+  await f.pm.openSelected(f.win)
+  assert.deepEqual([focused, f.requests.length, f.urls.length], [1, 0, 0])
+  await f.pm.openSelected(f.win, { web: true })
+  assert.equal(focused, 1)
+  assert.equal(f.requests.length, 3)
+  assert.deepEqual(f.urls, [`${site}/paper/7?library=1`])
+})
+
+test('the web entry explains the browser login step when no website account is saved', async () => {
+  const f = fixture()
+  f.prefs.set(f.pm.PREF_BASE, 'https://papermindapp.com')
+  let started = 0
+  f.pm.account = { record: () => null, start: async () => { started++; f.pm.account.pending = { code: 'ABCDEF123456' } } }
+  assert.equal(f.pm.isConfigured(), true) // A legacy device connection is insufficient at the official website.
+  await f.pm.openSelected(f.win, { web: true })
+  assert.equal(started, 1)
+  assert.equal(f.requests.length, 0)
+  assert.match(f.alerts.at(-1), /需要先登录研雀账号.*ABCDEF123456[\s\S]*再点一次「在研雀网页端打开」/)
+  f.pm.account = { record: () => null, status: '登录服务不可用', start: async () => {} }
+  await f.pm.openSelected(f.win, { web: true })
+  assert.match(f.alerts.at(-1), /网页端登录未能开始：登录服务不可用/)
+})
+
+test('self-hosted web entry retains device UID import without starting account login', async () => {
+  const f = fixture()
+  f.pm.account = { record: () => null, start: async () => assert.fail('Self-hosted device import must not start login') }
+  await f.pm.openSelected(f.win, { web: true })
+  assert.equal(f.requests.length, 3)
+  assert.deepEqual(f.urls, [`${BASE}/paper/7?library=1&uid=${UID}`])
+  assert.ok(f.requests.every(({ options }) => options.headers['X-User-ID'] === UID && !options.headers.Authorization))
+})
+
+test('a refusal from the site shows its own reason without a misleading network hint', async () => {
+  const f = fixture()
+  f.win.fetch = async (url, options) => { f.requests.push({ url, options })
+    return { ok: false, status: 410, headers: { get: () => 'application/json' }, text: async () => JSON.stringify({ detail: '公共 AI 额度与云端新增内容已停用。' }) } }
+  await f.pm.openSelected(f.win)
+  assert.match(f.alerts.at(-1), /^发送失败：保存文献失败（HTTP 410：公共 AI 额度与云端新增内容已停用。）$/)
+  f.win.fetch = async () => { throw new TypeError('NetworkError') }
+  await f.pm.openSelected(f.win)
+  assert.match(f.alerts.at(-1), /请检查网络/)
+})
+
+test('the web entry stays hidden unless its pref is on; menu items are added once and removed on shutdown', () => {
+  const f = fixture(), nodes = new Map()
+  const make = () => ({ setAttribute(key, value) { this[key] = value }, addEventListener() {}, remove() { nodes.delete(this.id) },
+    appendChild(child) { nodes.set(child.id, child) } })
+  const doc = { getElementById: id => id === 'zotero-itemmenu' || id === 'menu_ToolsPopup' ? make() : nodes.get(id) || null, createXULElement: make }
+  f.pm.addToWindow({ document: doc }); f.pm.addToWindow({ document: doc })
+  assert.deepEqual([...nodes.values()].map(x => x.label), ['用研雀精读', '研雀连接设置…'])
+  f.pm.removeFromWindow({ document: doc })
+  assert.equal(nodes.size, 0)
+  f.prefs.set(f.pm.PREF_WEB_ENTRY, true)
+  f.pm.addToWindow({ document: doc })
+  assert.deepEqual([...nodes.values()].map(x => x.label), ['用研雀精读', '在研雀网页端打开', '研雀连接设置…'])
+  f.pm.removeFromWindow({ document: doc })
+  assert.equal(nodes.size, 0)
+})
+
 for (const confirmed of [false, true]) {
   test(`unsafe saved account can ${confirmed ? 'disconnect locally after confirmation' : 'decline local disconnect without losing credentials'}`, async () => {
     const f = fixture(), unsafeBase = 'http://remote.example.test', confirmations = [], removed = []

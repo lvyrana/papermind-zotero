@@ -3,6 +3,8 @@
 var PaperMindReaderContext = {
   cache: new WeakMap(),
   realms: new WeakMap(),
+  wholeBudget: 120000,
+  partialBudget: 60000,
 
   active(win, paper) {
     const reader = Zotero.Reader.getByTabID?.(win.Zotero_Tabs?.selectedID)
@@ -47,7 +49,7 @@ var PaperMindReaderContext = {
 
   // Extract locally. A request receives a page-labelled, explicitly bounded
   // evidence packet, not an unlabelled claim to have sent the whole document.
-  async collect(active, query = '', signal) {
+  async collect(active, query = '', signal, { allowWhole = true } = {}) {
     if (!active?.pdf) return { pages: '', currentText: '', coverage: '未读取 PDF；仅有条目摘要', page: null }
     const { pdf, page } = active
     const currentText = await this.pageText(pdf, page).catch(() => '')
@@ -62,22 +64,26 @@ var PaperMindReaderContext = {
       chars += text.length
       if (chars >= 800000) break
     }
-    // Current page + beginning/end + lexical matches, then document order.
-    const priority = [...texts].sort((a, b) => {
+    // A journal article fits whole (14 pages ≈ 85k characters), so the model
+    // reads every page uncut. Longer documents fall back to current page +
+    // beginning/end + lexical matches within a larger budget.
+    const whole = allowWhole && texts.length === pdf.numPages && chars <= this.wholeBudget
+    const priority = whole ? texts : [...texts].sort((a, b) => {
       const score = x => (x.n === page ? 1000 : 0) + (x.n <= 2 || x.n === scanned ? 100 : 0) + x.score * 10
       return score(b) - score(a) || a.n - b.n
     })
-    const selected = [], budget = 22500
+    const selected = [], budget = this.partialBudget
     let used = 0
     for (const entry of priority) {
-      if (!entry.text || used >= budget) continue
-      const text = entry.text.slice(0, Math.min(5000, budget - used))
+      if (!entry.text || !whole && used >= budget) continue
+      const text = entry.text.slice(0, whole ? undefined : Math.min(12000, budget - used))
       selected.push({ ...entry, text, truncated: text.length < entry.text.length })
       used += text.length + 40
     }
     const pages = selected.sort((a, b) => a.n - b.n)
       .map(x => `[PDF 第 ${x.n} 页${x.truncated ? ' · 节选' : ''}]\n${x.text}`).join('\n\n')
-    const coverage = `本地检查 ${scanned}/${pdf.numPages} 页${failed ? `，${failed} 页读取失败` : ''}；本次提供 ${selected.length} 页文字或节选，不代表全部内容`
-    return { pages: `[读取范围：${coverage}]\n${pages}`.slice(0, 24000), currentText: currentText.slice(0, 5000), coverage, page, firstError }
+    const coverage = whole && !failed ? `全文 ${pdf.numPages} 页`
+      : `本地检查 ${scanned}/${pdf.numPages} 页${failed ? `，${failed} 页读取失败` : ''}；本次提供 ${selected.length} 页文字或节选，不代表全部内容`
+    return { pages: `[读取范围：${coverage}]\n${pages}`, currentText: currentText.slice(0, 20000), coverage, page, firstError }
   },
 }
