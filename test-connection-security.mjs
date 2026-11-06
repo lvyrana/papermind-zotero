@@ -175,12 +175,17 @@ test('a refusal from the site shows its own reason without a misleading network 
   assert.match(f.alerts.at(-1), /请检查网络/)
 })
 
-test('both item menu entries are added once and removed on shutdown', () => {
+test('the web entry stays hidden unless its pref is on; menu items are added once and removed on shutdown', () => {
   const f = fixture(), nodes = new Map()
   const make = () => ({ setAttribute(key, value) { this[key] = value }, addEventListener() {}, remove() { nodes.delete(this.id) },
     appendChild(child) { nodes.set(child.id, child) } })
   const doc = { getElementById: id => id === 'zotero-itemmenu' || id === 'menu_ToolsPopup' ? make() : nodes.get(id) || null, createXULElement: make }
   f.pm.addToWindow({ document: doc }); f.pm.addToWindow({ document: doc })
+  assert.deepEqual([...nodes.values()].map(x => x.label), ['用研雀精读', '研雀连接设置…'])
+  f.pm.removeFromWindow({ document: doc })
+  assert.equal(nodes.size, 0)
+  f.prefs.set(f.pm.PREF_WEB_ENTRY, true)
+  f.pm.addToWindow({ document: doc })
   assert.deepEqual([...nodes.values()].map(x => x.label), ['用研雀精读', '在研雀网页端打开', '研雀连接设置…'])
   f.pm.removeFromWindow({ document: doc })
   assert.equal(nodes.size, 0)

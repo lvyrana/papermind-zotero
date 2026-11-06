@@ -318,6 +318,30 @@ var PaperMindSidebar = {
     }
   },
 
+  // A sticky-note annotation in the margin beside the paragraph's first line:
+  // the translation lives in its comment and no highlight is drawn on the text.
+  translationNoteJSON(position, annotation, comment) {
+    const rect = position?.rects?.[0]
+    if (!Number.isInteger(position?.pageIndex) || !Array.isArray(rect) || rect.length < 4) return null
+    const size = 22, x = Math.max(0, rect[0] - size - 4), top = rect[3]
+    return { key: Zotero.DataObjectUtilities.generateKey(), type: 'note', color: '#ffd400', comment,
+      pageLabel: String(annotation?.pageLabel || position.pageIndex + 1),
+      sortIndex: annotation?.sortIndex || `${String(position.pageIndex).padStart(5, '0')}|000000|00000`,
+      position: { pageIndex: position.pageIndex, rects: [[x, top - size, x + size, top]] } }
+  },
+
+  async saveTranslationNote(source, annotation, position, comment) {
+    const attachment = Zotero.Items.getByLibraryAndKey(source.libraryID, source.attachmentKey)
+    if (!attachment?.isAttachment?.()) throw new Error('原文附件不可用。')
+    if (!Zotero.Libraries.get(attachment.libraryID)?.editable) throw new Error('这个文库是只读的。')
+    const json = this.translationNoteJSON(position, annotation, comment)
+    if (!json) throw new Error('无法确定这段原文在页面上的位置。')
+    // Saving the same paragraph twice keeps one note.
+    const same = attachment.getAnnotations().some(item => item.annotationType === 'note' && item.annotationComment === comment
+      && JSON.parse(item.annotationPosition || '{}').pageIndex === position.pageIndex)
+    if (!same) await Zotero.Annotations.saveFromJSON(attachment, json)
+  },
+
   async translateInline({ reader, doc, annotation, source, bar }) {
     this.translations.get(reader)?.close()
     const win = Zotero.getMainWindow()
@@ -336,10 +360,17 @@ var PaperMindSidebar = {
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12px;color:#64816e;margin-bottom:6px;'
     const title = doc.createElement('span')
     title.textContent = '研雀 · 翻译'
-    const close = doc.createElement('button')
-    close.textContent = '关闭'
-    close.style.cssText = 'font:inherit;color:inherit;background:transparent;border:0;cursor:pointer;padding:2px 6px;'
-    header.append(title, close)
+    const tool = text => {
+      const node = doc.createElement('button')
+      node.textContent = text
+      node.style.cssText = 'font:inherit;color:inherit;background:transparent;border:0;cursor:pointer;padding:2px 6px;'
+      return node
+    }
+    const close = tool('关闭'), copy = tool('复制'), keep = tool('存为批注')
+    copy.hidden = keep.hidden = true
+    const tools = doc.createElement('span')
+    tools.append(copy, keep, close)
+    header.append(title, tools)
     const result = doc.createElement('div')
     result.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;user-select:text;'
     result.textContent = '正在翻译…'
@@ -409,7 +440,23 @@ var PaperMindSidebar = {
       if (closed) return
       if (identity !== [PaperMind.getBaseURL(), PaperMind.getUid()].join('|')) { state.close(); return }
       if (!data.ok || !data.translated) throw new Error(data.error || '没有收到译文，请重试。')
-      result.textContent = String(data.translated)
+      const translated = String(data.translated)
+      result.textContent = translated
+      copy.hidden = keep.hidden = false
+      copy.addEventListener('click', () => {
+        Zotero.Utilities.Internal.copyTextToClipboard(translated)
+        copy.textContent = '✓ 已复制'
+      })
+      keep.addEventListener('click', async () => {
+        keep.disabled = true
+        try {
+          await this.saveTranslationNote(source, annotation, position, translated)
+          keep.textContent = '✓ 已存为批注'
+        } catch (error) {
+          keep.disabled = false
+          result.textContent = translated + '\n\n未能存为批注：' + error.message
+        }
+      })
     } catch (error) {
       if (!closed) result.textContent = error.name === 'AbortError' ? '翻译超时，关闭后可重试。' : '翻译失败：' + error.message
     } finally {

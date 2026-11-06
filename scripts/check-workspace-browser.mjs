@@ -189,7 +189,9 @@ try {
   // Keep the preceding long-title stress test and its evidence unchanged.
   await page.evaluate(() => {
     __paper.getField = __originalGetField
-    PaperMindSidebar.refresh(PaperMindSidebar.sessionFor(__paper))
+    const s = PaperMindSidebar.sessionFor(__paper)
+    s.messages.pop() // Drop the long-answer stress entry from the README view.
+    PaperMindSidebar.refresh(s)
   })
   await page.locator('.pmw').screenshot({ path: join(artifacts, 'readme-reading-card.png') })
   await page.evaluate(async () => {

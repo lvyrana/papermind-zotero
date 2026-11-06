@@ -19,6 +19,8 @@
 var PaperMind = {
   MENU_ID: 'papermind-open-menuitem',
   WEB_MENU_ID: 'papermind-web-menuitem',
+  // The public site is archive-only, so this entry stays hidden unless turned on.
+  PREF_WEB_ENTRY: 'extensions.papermind.showWebEntry',
   TOOLS_ID: 'papermind-settings-menuitem',
   PREF_BASE: 'extensions.papermind.baseURL',
   PREF_UID: 'extensions.papermind.uid',
@@ -402,11 +404,13 @@ var PaperMind = {
       mi.setAttribute('label', '用研雀精读')
       mi.addEventListener('command', () => this.openSelected(win))
       itemMenu.appendChild(mi)
-      const web = doc.createXULElement('menuitem')
-      web.id = this.WEB_MENU_ID
-      web.setAttribute('label', '在研雀网页端打开')
-      web.addEventListener('command', () => this.openSelected(win, { web: true }))
-      itemMenu.appendChild(web)
+      if (Zotero.Prefs.get(this.PREF_WEB_ENTRY, true) === true) {
+        const web = doc.createXULElement('menuitem')
+        web.id = this.WEB_MENU_ID
+        web.setAttribute('label', '在研雀网页端打开')
+        web.addEventListener('command', () => this.openSelected(win, { web: true }))
+        itemMenu.appendChild(web)
+      }
     }
 
     // Tools 菜单：连接设置

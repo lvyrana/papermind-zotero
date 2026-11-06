@@ -301,3 +301,24 @@ test('read-only libraries never create notes', async () => {
   assert.equal(f.notes.length, 0)
   assert.match(f.session.error, /只读/)
 })
+
+test('a translation is kept as a margin sticky note without highlighting, once per paragraph', async () => {
+  const f = fixture(), saved = []
+  f.Zotero.DataObjectUtilities = { generateKey: () => 'ANNOTKEY' }
+  f.Zotero.Annotations = { saveFromJSON: async (parent, json) => { saved.push(json) } }
+  f.Zotero.Items.getByLibraryAndKey = () => f.attachment
+  f.attachment.getAnnotations = () => saved.map(json => ({ annotationType: json.type, annotationComment: json.comment, annotationPosition: JSON.stringify(json.position) }))
+  const source = { libraryID: 1, attachmentKey: 'PDF12345' }, position = { pageIndex: 3, rects: [[10, 700, 300, 712], [10, 680, 300, 692]] }
+  await f.sidebar.saveTranslationNote(source, { pageLabel: '4' }, position, '中文译文')
+  await f.sidebar.saveTranslationNote(source, { pageLabel: '4' }, position, '中文译文')
+  assert.equal(saved.length, 1)
+  assert.equal(saved[0].type, 'note')
+  assert.equal(saved[0].comment, '中文译文')
+  assert.equal(saved[0].text, undefined)
+  assert.deepEqual(JSON.parse(JSON.stringify(saved[0].position)), { pageIndex: 3, rects: [[0, 690, 22, 712]] })
+  assert.equal(saved[0].sortIndex, '00003|000000|00000')
+  await assert.rejects(f.sidebar.saveTranslationNote(source, {}, { pageIndex: 3 }, '另一段'), /位置/)
+  f.Zotero.Libraries.get = () => ({ editable: false })
+  await assert.rejects(f.sidebar.saveTranslationNote(source, {}, position, '另一段'), /只读/)
+  assert.equal(saved.length, 1)
+})

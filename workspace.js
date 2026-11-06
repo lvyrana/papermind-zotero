@@ -549,7 +549,7 @@ var PaperMindWorkspace = {
       }
       this.renderToggles(content, el)
       el('h3', '连接与数据', content)
-      el('p', 'PDF 在本地读取。点击 AI 操作时向个人配置的服务发送题名、摘要、当前页、选段和相关文字节选；不上传 PDF 文件。', content)
+      el('p', 'PDF 在本地读取。点击 AI 操作时向个人配置的服务发送题名、摘要、当前页、选段和论文文字（期刊论文通常为全文文字，读摘要时只发题名和摘要）；不上传 PDF 文件本身。', content)
       el('p', '卡片、对话、自测和汇报保存在本机 Zotero 配置目录。研雀不备份这些记录；导出的文件由使用者自行保存。保存到 Zotero 笔记的内容遵循 Zotero 自身的同步设置。', content)
       button(content, '导出本篇完整阅读记录', () => this.transfer(session, win, false), busy)
       button(content, '恢复本篇阅读记录', () => this.transfer(session, win, true), busy)
